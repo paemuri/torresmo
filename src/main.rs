@@ -39,7 +39,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     println!("No torrents");
   }
   for torrent in torrents {
-    let id = &torrent["id"];
+    let id = torrent["id"].as_u64().unwrap_or(0);
     let name = torrent["name"].as_str().unwrap_or("?");
     let done = torrent["percentDone"].as_f64().unwrap_or(0.0) * 100.0;
     let status = status_label(torrent["status"].as_u64());
