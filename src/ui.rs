@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Style, Stylize};
@@ -11,14 +10,15 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
   Block, Clear, Padding, Paragraph, Row, Table, TableState, Wrap,
 };
+use ratatui::{DefaultTerminal, Frame};
 
 use crate::format::{
   format_bytes, format_eta, format_ratio, format_speed, status_label, truncate,
 };
 use crate::rpc::Rpc;
 use crate::transmission::{
-  Snapshot, Torrent, TorrentDetails, TorrentStatus, fetch, fetch_details,
-  torrent_action,
+  Snapshot, Torrent, TorrentDetails, TorrentStatus, delete_torrent, fetch,
+  fetch_details, torrent_action,
 };
 
 const REFRESH: Duration = Duration::from_secs(1);
@@ -30,6 +30,8 @@ enum Mode {
   List,
   Help,
   Details(String),
+  DeleteAskData(String),
+  DeleteConfirm { hash: String, delete_data: bool },
 }
 
 pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
@@ -97,32 +99,33 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
 
       match (&mode, &details) {
         (Mode::Help, _) => {
-          let help = help_text(&snapshot);
-          let popup = frame.area().centered(
-            Constraint::Length(help.width() as u16 + 4),
-            Constraint::Length(help.height() as u16 + 2),
-          );
-          let help = Paragraph::new(help).block(
-            Block::bordered()
-              .title(" Help ")
-              .padding(Padding::horizontal(1)),
-          );
-          frame.render_widget(Clear, popup);
-          frame.render_widget(help, popup);
+          small_popup(frame, " Help ", help_text(&snapshot));
         }
         (Mode::Details(_), Some(details)) => {
           let text = details_text(details);
-          let popup = frame.area().centered(
-            Constraint::Percentage(80),
-            Constraint::Max(text.height() as u16 + 2),
-          );
-          let text = Paragraph::new(text).wrap(Wrap { trim: false }).block(
-            Block::bordered()
-              .title(" Details ")
-              .padding(Padding::horizontal(1)),
-          );
-          frame.render_widget(Clear, popup);
-          frame.render_widget(text, popup);
+          popup(frame, " Details ", text, Constraint::Percentage(80));
+        }
+        (Mode::DeleteAskData(hash), _) => {
+          let text = Text::from(vec![
+            Line::from(torrent_name(&snapshot, hash)).bold(),
+            Line::from(
+              "Also delete its downloaded data? (y)es / (n)o / Esc to cancel",
+            ),
+          ]);
+          small_popup(frame, " Delete torrent ", text);
+        }
+        (Mode::DeleteConfirm { hash, delete_data }, _) => {
+          let mut text = Text::from(vec![
+            Line::from(torrent_name(&snapshot, hash)).bold(),
+            Line::from("Are you sure?"),
+          ]);
+          let title = if *delete_data {
+            text = text.red();
+            " Delete torrent and data "
+          } else {
+            " Delete torrent, keep data "
+          };
+          small_popup(frame, title, text);
         }
         _ => {}
       }
@@ -138,17 +141,33 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
         .selected()
         .and_then(|index| snapshot.torrents.get(index));
       let mut action = None;
-      match key.code {
-        KeyCode::Char('q') => return Ok(()),
-        KeyCode::Char('h') | KeyCode::F(1) if mode == Mode::Help => {
-          mode = Mode::List
+      match (&mode, key.code) {
+        (Mode::DeleteAskData(hash), KeyCode::Char(answer @ ('y' | 'n'))) => {
+          mode = Mode::DeleteConfirm {
+            hash: hash.clone(),
+            delete_data: answer == 'y',
+          };
         }
-        KeyCode::Char('h') | KeyCode::F(1) => mode = Mode::Help,
-        KeyCode::Esc => mode = Mode::List,
-        _ if mode != Mode::List => {}
-        KeyCode::Up => selection.select_previous(),
-        KeyCode::Down => selection.select_next(),
-        KeyCode::Enter => {
+        (Mode::DeleteAskData(_), KeyCode::Esc) => mode = Mode::List,
+        (Mode::DeleteAskData(_), _) => {}
+        (Mode::DeleteConfirm { hash, delete_data }, KeyCode::Char('y')) => {
+          match delete_torrent(rpc, hash, *delete_data) {
+            Ok(()) => next_refresh = Instant::now(),
+            Err(e) => action_error = Some(e.to_string()),
+          }
+          mode = Mode::List;
+        }
+        // Just for safety measures, anything that isn't `y` during deletion
+        // confirmation cancels the action.
+        (Mode::DeleteConfirm { .. }, _) => mode = Mode::List,
+        (_, KeyCode::Char('q')) => return Ok(()),
+        (Mode::Help, KeyCode::Char('h') | KeyCode::F(1)) => mode = Mode::List,
+        (_, KeyCode::Char('h') | KeyCode::F(1)) => mode = Mode::Help,
+        (_, KeyCode::Esc) => mode = Mode::List,
+        (Mode::Help | Mode::Details(_), _) => {}
+        (_, KeyCode::Up) => selection.select_previous(),
+        (_, KeyCode::Down) => selection.select_next(),
+        (_, KeyCode::Enter) => {
           if let Some(torrent) = selected {
             match fetch_details(rpc, &torrent.hash_string) {
               Ok(Some(new)) => {
@@ -160,14 +179,19 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
             }
           }
         }
-        KeyCode::Char('s') => {
+        (_, KeyCode::Char('d') | KeyCode::Delete | KeyCode::Backspace) => {
+          if let Some(torrent) = selected {
+            mode = Mode::DeleteAskData(torrent.hash_string.clone());
+          }
+        }
+        (_, KeyCode::Char('s')) => {
           action = selected.map(|torrent| match torrent.status {
             TorrentStatus::Stopped => "torrent-start",
             _ => "torrent-stop",
           });
         }
-        KeyCode::Char('S') => action = Some("torrent-start-now"),
-        KeyCode::Char('v') => action = Some("torrent-verify"),
+        (_, KeyCode::Char('S')) => action = Some("torrent-start-now"),
+        (_, KeyCode::Char('v')) => action = Some("torrent-verify"),
         _ => {}
       }
 
@@ -197,6 +221,32 @@ fn keep_selected_torrent(
   }
 }
 
+fn popup(frame: &mut Frame, title: &str, text: Text, width: Constraint) {
+  let area = frame
+    .area()
+    .centered(width, Constraint::Length(text.height() as u16 + 2));
+  let paragraph = Paragraph::new(text).wrap(Wrap { trim: false }).block(
+    Block::bordered()
+      .title(title)
+      .padding(Padding::horizontal(1)),
+  );
+  frame.render_widget(Clear, area);
+  frame.render_widget(paragraph, area);
+}
+
+fn small_popup(frame: &mut Frame, title: &str, text: Text) {
+  let width = Constraint::Length(text.width() as u16 + 4);
+  popup(frame, title, text, width);
+}
+
+fn torrent_name(snapshot: &Snapshot, hash: &str) -> String {
+  snapshot
+    .torrents
+    .iter()
+    .find(|torrent| torrent.hash_string == hash)
+    .map_or_else(|| hash.to_owned(), |torrent| torrent.name.clone())
+}
+
 fn footer_text(snapshot: &Snapshot) -> String {
   format!(
     "press h for help | ↓ {}/s ↑ {}/s | ↓ {} ↑ {} total",
@@ -214,6 +264,7 @@ fn help_text(snapshot: &Snapshot) -> Text<'static> {
     field("s", "Toggle pause (start/stop)".into(), 7),
     field("S", "Start now, skipping the queue".into(), 7),
     field("v", "Verify the downloaded data".into(), 7),
+    field("d", "Delete the torrent".into(), 7),
     field("Esc", "Close the popup".into(), 7),
     field("h", "Show help/info".into(), 7),
     field("q", "Quit".into(), 7),

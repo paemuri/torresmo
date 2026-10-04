@@ -161,6 +161,18 @@ pub fn torrent_action(
   Ok(())
 }
 
+pub fn delete_torrent(
+  rpc: &mut Rpc,
+  hash: &str,
+  delete_data: bool,
+) -> Result<(), Box<dyn Error>> {
+  rpc.call(
+    "torrent-remove",
+    json!({ "ids": [hash], "delete-local-data": delete_data }),
+  )?;
+  Ok(())
+}
+
 pub fn fetch_details(
   rpc: &mut Rpc,
   hash: &str,
