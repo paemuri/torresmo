@@ -184,7 +184,7 @@ impl App {
         if let Some(torrent) = selected {
           match read_line(terminal, "Rename torrent", &torrent.name) {
             Ok(Some(name))
-              if !name.trim().is_empty() && name != torrent.name =>
+              if !name.trim().is_empty() && name.trim() != torrent.name =>
             {
               let hash = &torrent.hash_string;
               match rename_torrent(rpc, hash, &torrent.name, name.trim()) {
