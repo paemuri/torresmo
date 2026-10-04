@@ -189,12 +189,10 @@ pub fn auto_sort_by_ratio(
   rpc: &mut Rpc,
   torrents: &[Torrent],
 ) -> Result<(), Box<dyn Error>> {
-  let rank = |torrent: &Torrent| {
-    // Transmission sends -1 (not available) and -2 (infinite) for the ratio.
-    match torrent.upload_ratio {
-      -2.0 => f64::INFINITY,
-      ratio => ratio.max(0.0),
-    }
+  // Transmission sends -1 (not available) and -2 (infinite) for the ratio.
+  let rank = |torrent: &Torrent| match torrent.upload_ratio {
+    -2.0 => f64::INFINITY,
+    ratio => ratio.max(0.0),
   };
 
   let mut by_ratio: Vec<&Torrent> = torrents.iter().collect();

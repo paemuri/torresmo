@@ -123,13 +123,13 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
       frame.render_widget(footer, footer_area);
 
       match (&mode, &details) {
-        (Mode::Help, _) => {
-          small_popup(frame, " Help ", help_text(&snapshot));
-        }
-        (Mode::Details(_), Some(details)) => {
-          let text = details_text(details);
-          popup(frame, " Details ", text, Constraint::Percentage(80));
-        }
+        (Mode::Help, _) => small_popup(frame, " Help ", help_text(&snapshot)),
+        (Mode::Details(_), Some(details)) => popup(
+          frame,
+          " Details ",
+          details_text(details),
+          Constraint::Percentage(80),
+        ),
         (Mode::DeleteAskData(hash), _) => {
           let text = Text::from(vec![
             Line::from(torrent_name(&snapshot, hash)).bold(),
@@ -172,7 +172,7 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
           mode = Mode::DeleteConfirm {
             hash: hash.clone(),
             delete_data: answer == 'y',
-          };
+          }
         }
         (Mode::DeleteAskData(_), KeyCode::Esc) => mode = Mode::List,
         (Mode::DeleteAskData(_), _) => {}
@@ -230,7 +230,7 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
           action = selected.map(|torrent| match torrent.status {
             TorrentStatus::Stopped => "torrent-start",
             _ => "torrent-stop",
-          });
+          })
         }
         (_, KeyCode::Char('S')) => action = Some("torrent-start-now"),
         (_, KeyCode::Char('v')) => action = Some("torrent-verify"),
