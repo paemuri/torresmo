@@ -32,12 +32,20 @@ fn run() -> Result<(), Box<dyn Error>> {
 
   let session = rpc.call("session-get", json!({ "fields": ["version"] }))?;
   let version = session["version"].as_str().unwrap_or("unknown");
-  let header = format!("Transmission is up (version {version})");
+  let title = format!("Transmission is up (version {version})");
 
-  let reply = rpc.call(
-    "torrent-get",
-    json!({ "fields": ["id", "name", "percentDone", "status"] }),
-  )?;
+  let fields = [
+    "id",
+    "name",
+    "percentDone",
+    "status",
+    "sizeWhenDone",
+    "rateDownload",
+    "rateUpload",
+    "eta",
+    "uploadRatio",
+  ];
+  let reply = rpc.call("torrent-get", json!({ "fields": fields }))?;
   let torrents = reply["torrents"]
     .as_array()
     .ok_or("torrent-get reply without a torrent list")?;
@@ -48,47 +56,64 @@ fn run() -> Result<(), Box<dyn Error>> {
     let name = torrent["name"].as_str().unwrap_or("?");
     let done = torrent["percentDone"].as_f64().unwrap_or(0.0) * 100.0;
     let status = status_label(torrent["status"].as_u64());
+    let size = torrent["sizeWhenDone"].as_u64().unwrap_or(0);
+    let down = torrent["rateDownload"].as_u64().unwrap_or(0);
+    let up = torrent["rateUpload"].as_u64().unwrap_or(0);
+    let eta = torrent["eta"].as_i64().unwrap_or(-1);
+    let ratio = torrent["uploadRatio"].as_f64().unwrap_or(-1.0);
     rows.push([
       id.to_string(),
       status.to_owned(),
       format!("{done:.1}%"),
+      format_bytes(size),
+      format_speed(down),
+      format_speed(up),
+      format_eta(eta),
+      format_ratio(ratio),
       name.to_owned(),
     ]);
   }
 
-  ratatui::run(|terminal| show(terminal, &header, &rows))?;
+  ratatui::run(|terminal| show(terminal, &title, &rows))?;
 
   Ok(())
 }
 
 fn show(
   terminal: &mut DefaultTerminal,
-  header: &str,
-  rows: &[[String; 4]],
+  title: &str,
+  rows: &[[String; 9]],
 ) -> io::Result<()> {
   let widths = [
     Constraint::Length(4),
     Constraint::Length(15),
     Constraint::Length(8),
+    Constraint::Length(8),
+    Constraint::Length(10),
+    Constraint::Length(10),
+    Constraint::Length(7),
+    Constraint::Length(6),
     Constraint::Fill(1),
   ];
-  let header_row = Row::new([
-    Line::from("#").right_aligned(),
-    Line::from("State"),
-    Line::from("Progress").right_aligned(),
-    Line::from("Name"),
+  let header_row = table_row([
+    "#", "State", "Progress", "Size", "Down", "Up", "ETA", "Ratio", "Name",
   ]);
-  let table = Table::new(rows.iter().map(table_row), widths)
-    .header(header_row.bold())
-    .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
+  let table = Table::new(
+    rows
+      .iter()
+      .map(|row| table_row(row.each_ref().map(String::as_str))),
+    widths,
+  )
+  .header(header_row.bold())
+  .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
   let mut selection = TableState::default().with_selected(Some(0));
 
   loop {
     terminal.draw(|frame| {
-      let [header_area, table_area] =
+      let [title_area, table_area] =
         Layout::vertical([Constraint::Length(1), Constraint::Fill(1)])
           .areas(frame.area());
-      frame.render_widget(header, header_area);
+      frame.render_widget(title, title_area);
       frame.render_stateful_widget(&table, table_area, &mut selection);
     })?;
 
@@ -105,13 +130,66 @@ fn show(
   }
 }
 
-fn table_row([id, status, progress, name]: &[String; 4]) -> Row<'_> {
+fn table_row(cells: [&str; 9]) -> Row<'_> {
+  let [id, status, progress, size, down, up, eta, ratio, name] = cells;
+  // Every column except State and Name holds a number, so it's right-aligned.
   Row::new([
-    Line::from(id.as_str()).right_aligned(),
-    Line::from(status.as_str()),
-    Line::from(progress.as_str()).right_aligned(),
-    Line::from(name.as_str()),
+    Line::from(id).right_aligned(),
+    Line::from(status),
+    Line::from(progress).right_aligned(),
+    Line::from(size).right_aligned(),
+    Line::from(down).right_aligned(),
+    Line::from(up).right_aligned(),
+    Line::from(eta).right_aligned(),
+    Line::from(ratio).right_aligned(),
+    Line::from(name),
   ])
+}
+
+fn format_bytes(bytes: u64) -> String {
+  // Decimal units (1 kB = 1000 B), the same as Transmission's own clients.
+  const UNITS: [&str; 4] = ["kB", "MB", "GB", "TB"];
+  if bytes < 1000 {
+    return format!("{bytes} B");
+  }
+  let mut value = bytes as f64 / 1000.0;
+  let mut unit = 0;
+  while value >= 1000.0 && unit < UNITS.len() - 1 {
+    value /= 1000.0;
+    unit += 1;
+  }
+  format!("{value:.1} {}", UNITS[unit])
+}
+
+fn format_speed(bytes_per_second: u64) -> String {
+  if bytes_per_second == 0 {
+    return String::new();
+  }
+  format!("{}/s", format_bytes(bytes_per_second))
+}
+
+fn format_eta(seconds: i64) -> String {
+  // Transmission sends -1 (not available) and -2 (unknown) for the ETA.
+  if seconds < 0 {
+    return "-".to_owned();
+  }
+  let (days, hours) = (seconds / 86_400, seconds / 3_600 % 24);
+  let (minutes, secs) = (seconds / 60 % 60, seconds % 60);
+  match (days, hours, minutes) {
+    (0, 0, 0) => format!("{secs}s"),
+    (0, 0, _) => format!("{minutes}m {secs}s"),
+    (0, _, _) => format!("{hours}h {minutes}m"),
+    _ => format!("{days}d {hours}h"),
+  }
+}
+
+fn format_ratio(ratio: f64) -> String {
+  // Transmission sends -1 (not available) and -2 (infinite) for the ratio.
+  match ratio {
+    -1.0 => "-".to_owned(),
+    -2.0 => "∞".to_owned(),
+    _ => format!("{ratio:.2}"),
+  }
 }
 
 fn status_label(status: Option<u64>) -> &'static str {
