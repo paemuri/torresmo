@@ -18,8 +18,6 @@ use serde_json::{Value, json};
 
 const URL: &str = "http://localhost:9091/transmission/rpc";
 const SESSION_HEADER: &str = "X-Transmission-Session-Id";
-const KEYS: &str = "\
-";
 
 fn main() -> ExitCode {
   match run() {
