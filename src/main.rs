@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::io;
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 
 const URL: &str = "http://localhost:9091/transmission/rpc";
 const SESSION_HEADER: &str = "X-Transmission-Session-Id";
+const REFRESH: Duration = Duration::from_secs(1);
 
 fn main() -> ExitCode {
   match run() {
@@ -31,7 +32,18 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), Box<dyn Error>> {
   let mut rpc = Rpc::new()?;
+  let snapshot = fetch(&mut rpc)?;
+  ratatui::run(|terminal| show(terminal, &mut rpc, snapshot))?;
+  Ok(())
+}
 
+struct Snapshot {
+  footer: String,
+  help: String,
+  rows: Vec<[String; 9]>,
+}
+
+fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
   let session = rpc.call(
     "session-get",
     json!({ "fields": ["version", "download-dir"] }),
@@ -106,16 +118,13 @@ fn run() -> Result<(), Box<dyn Error>> {
     ]);
   }
 
-  ratatui::run(|terminal| show(terminal, &footer, &help, &rows))?;
-
-  Ok(())
+  Ok(Snapshot { footer, help, rows })
 }
 
 fn show(
   terminal: &mut DefaultTerminal,
-  footer: &str,
-  help: &str,
-  rows: &[[String; 9]],
+  rpc: &mut Rpc,
+  mut snapshot: Snapshot,
 ) -> io::Result<()> {
   let widths = [
     Constraint::Length(4),
@@ -130,43 +139,52 @@ fn show(
   ];
   let header_row = table_row([
     "#", "Name", "State", "Size", "Progress", "ETA", "Down", "Up", "Ratio",
-  ]);
-  let table = Table::new(
-    rows
-      .iter()
-      .map(|row| table_row(row.each_ref().map(String::as_str))),
-    widths,
-  )
-  .header(header_row.bold())
-  .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
+  ])
+  .bold();
   let mut selection = TableState::default().with_selected(Some(0));
-
-  let help = Text::from(help);
-  let help_width = Constraint::Length(help.width() as u16 + 4);
-  let help_height = Constraint::Length(help.height() as u16 + 2);
-  let help = Paragraph::new(help).block(
-    Block::bordered()
-      .title(" Help ")
-      .padding(Padding::horizontal(1)),
-  );
   let mut show_help = false;
+  let mut error: Option<String> = None;
+  let mut next_refresh = Instant::now() + REFRESH;
 
   loop {
     terminal.draw(|frame| {
+      let rows = snapshot
+        .rows
+        .iter()
+        .map(|row| table_row(row.each_ref().map(String::as_str)));
+      let table = Table::new(rows, widths)
+        .header(header_row.clone())
+        .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
+      let footer = match &error {
+        Some(error) => Line::from(format!("Error: {error}")).red(),
+        None => Line::from(snapshot.footer.as_str()),
+      };
+
       let [table_area, footer_area] =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
           .areas(frame.area());
-      frame.render_stateful_widget(&table, table_area, &mut selection);
+      frame.render_stateful_widget(table, table_area, &mut selection);
       frame.render_widget(footer, footer_area);
 
       if show_help {
-        let popup = frame.area().centered(help_width, help_height);
+        let help = Text::from(snapshot.help.as_str());
+        let popup = frame.area().centered(
+          Constraint::Length(help.width() as u16 + 4),
+          Constraint::Length(help.height() as u16 + 2),
+        );
+        let help = Paragraph::new(help).block(
+          Block::bordered()
+            .title(" Help ")
+            .padding(Padding::horizontal(1)),
+        );
         frame.render_widget(Clear, popup);
-        frame.render_widget(&help, popup);
+        frame.render_widget(help, popup);
       }
     })?;
 
-    if let Event::Key(key) = event::read()?
+    let timeout = next_refresh.saturating_duration_since(Instant::now());
+    if event::poll(timeout)?
+      && let Event::Key(key) = event::read()?
       && key.kind == KeyEventKind::Press
     {
       match key.code {
@@ -179,6 +197,17 @@ fn show(
         KeyCode::Down => selection.select_next(),
         _ => {}
       }
+    }
+
+    if Instant::now() >= next_refresh {
+      match fetch(rpc) {
+        Ok(new) => {
+          snapshot = new;
+          error = None;
+        }
+        Err(e) => error = Some(e.to_string()),
+      }
+      next_refresh = Instant::now() + REFRESH;
     }
   }
 }
