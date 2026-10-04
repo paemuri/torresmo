@@ -165,9 +165,9 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
         (_, KeyCode::Char('h') | KeyCode::F(1)) => mode = Mode::Help,
         (_, KeyCode::Esc) => mode = Mode::List,
         (Mode::Help | Mode::Details(_), _) => {}
-        (_, KeyCode::Up) => selection.select_previous(),
-        (_, KeyCode::Down) => selection.select_next(),
-        (_, KeyCode::Enter) => {
+        (_, KeyCode::Up | KeyCode::Char('k')) => selection.select_previous(),
+        (_, KeyCode::Down | KeyCode::Char('j')) => selection.select_next(),
+        (_, KeyCode::Enter | KeyCode::Char('i')) => {
           if let Some(torrent) = selected {
             match fetch_details(rpc, &torrent.hash_string) {
               Ok(Some(new)) => {
@@ -259,15 +259,15 @@ fn footer_text(snapshot: &Snapshot) -> String {
 
 fn help_text(snapshot: &Snapshot) -> Text<'static> {
   Text::from(vec![
-    field("↑ ↓", "Move the selection".into(), 7),
-    field("Enter", "Show the torrent details".into(), 7),
-    field("s", "Toggle pause (start/stop)".into(), 7),
-    field("S", "Start now, skipping the queue".into(), 7),
-    field("v", "Verify the downloaded data".into(), 7),
-    field("d", "Delete the torrent".into(), 7),
-    field("Esc", "Close the popup".into(), 7),
-    field("h", "Show help/info".into(), 7),
-    field("q", "Quit".into(), 7),
+    field("↑ ↓ / k j", "Move the selection".into(), 16),
+    field("i / Enter", "Show the torrent details".into(), 16),
+    field("s", "Toggle pause (start/stop)".into(), 16),
+    field("S", "Start now, skipping the queue".into(), 16),
+    field("v", "Verify the downloaded data".into(), 16),
+    field("d / Del / Bksp", "Delete the torrent".into(), 16),
+    field("Esc", "Close the popup".into(), 16),
+    field("h / F1", "Show help".into(), 16),
+    field("q", "Quit".into(), 16),
     Line::default(),
     field("Location", snapshot.download_dir.clone(), 13),
     field("Transmission", snapshot.version.clone(), 13),
