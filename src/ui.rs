@@ -1,308 +1,93 @@
-use std::error::Error;
-use std::io;
-use std::path::Path;
-use std::time::{Duration, Instant};
-
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use ratatui::crossterm::cursor::{MoveTo, Show};
-use ratatui::crossterm::event::{
-  self, Event, KeyCode, KeyEventKind, KeyModifiers,
-};
-use ratatui::crossterm::execute;
-use ratatui::crossterm::style::Print;
-use ratatui::crossterm::terminal::{
-  Clear as ClearTerminal, ClearType, disable_raw_mode, enable_raw_mode,
-};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{
-  Block, Clear, Padding, Paragraph, Row, Table, TableState, Wrap,
-};
-use ratatui::{DefaultTerminal, Frame};
-use rustyline::completion::FilenameCompleter;
-use rustyline::error::ReadlineError;
-use rustyline::{
-  Cmd, Completer, CompletionType, Config, Editor, Helper, Highlighter, Hinter,
-  KeyEvent, Modifiers, Validator,
-};
+use ratatui::widgets::{Block, Clear, Padding, Paragraph, Row, Table, Wrap};
 
+use crate::app::{App, Mode};
 use crate::format::{
   format_bytes, format_eta, format_ratio, format_speed, status_label, truncate,
 };
-use crate::rpc::Rpc;
-use crate::transmission::{
-  Snapshot, Torrent, TorrentDetails, TorrentStatus, add_torrent,
-  auto_sort_by_ratio, delete_torrent, fetch, fetch_details, move_torrent,
-  rename_torrent, torrent_action,
-};
+use crate::transmission::{Snapshot, Torrent, TorrentDetails};
 
-const REFRESH: Duration = Duration::from_secs(1);
 const COLUMNS: usize = 9;
 const NAME_COLUMN: usize = 1;
 const HEADERS: [&str; COLUMNS] = [
   "#", "Name", "State", "Size", "%", "ETA", "Down", "Up", "Ratio",
 ];
 
-#[derive(Clone, PartialEq)]
-enum Mode {
-  List,
-  Help,
-  Details(String),
-  DeleteAskData(String),
-  DeleteConfirm { hash: String, delete_data: bool },
-}
+impl App {
+  pub fn draw(&mut self, frame: &mut Frame) {
+    let [table_area, footer_area] =
+      Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
+        .areas(frame.area());
 
-#[derive(Helper, Completer, Highlighter, Hinter, Validator)]
-struct PathHelper {
-  #[rustyline(Completer)]
-  completer: FilenameCompleter,
-}
-
-pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
-  let header_row = table_row(HEADERS).bold();
-  let mut snapshot = Snapshot::default();
-  let mut selection = TableState::default().with_selected(Some(0));
-  let mut mode = Mode::List;
-  let mut details: Option<TorrentDetails> = None;
-  let mut error: Option<String> = None;
-  let mut action_error: Option<String> = None;
-  let mut next_refresh = Instant::now();
-
-  loop {
-    if Instant::now() >= next_refresh {
-      match fetch(rpc) {
-        Ok(new) => {
-          keep_selected_torrent(
-            &mut selection,
-            &snapshot.torrents,
-            &new.torrents,
-          );
-          snapshot = new;
-          error = None;
-        }
-        Err(e) => error = Some(e.to_string()),
-      }
-      if let Mode::Details(hash) = &mode {
-        match fetch_details(rpc, hash) {
-          Ok(Some(new)) => details = Some(new),
-          Ok(None) => mode = Mode::List,
-          Err(e) => error = Some(e.to_string()),
-        }
-      }
-      next_refresh = Instant::now() + REFRESH;
+    let mut cells: Vec<[String; COLUMNS]> =
+      self.snapshot.torrents.iter().map(torrent_cells).collect();
+    let widths = column_widths(&cells);
+    let [_, name_area, ..] = Layout::horizontal(widths)
+      .spacing(1)
+      .areas::<COLUMNS>(table_area);
+    for row in &mut cells {
+      row[NAME_COLUMN] = truncate(&row[NAME_COLUMN], name_area.width.into());
     }
 
-    terminal.draw(|frame| {
-      let [table_area, footer_area] =
-        Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
-          .areas(frame.area());
-
-      let mut cells: Vec<[String; COLUMNS]> =
-        snapshot.torrents.iter().map(torrent_cells).collect();
-      let widths = column_widths(&cells);
-      let [_, name_area, ..] = Layout::horizontal(widths)
-        .spacing(1)
-        .areas::<COLUMNS>(table_area);
-      for row in &mut cells {
-        row[NAME_COLUMN] = truncate(&row[NAME_COLUMN], name_area.width.into());
-      }
-
-      let rows = cells.iter().zip(&snapshot.torrents).map(|(row, torrent)| {
-        table_row(row.each_ref().map(String::as_str))
-          .style(error_style(torrent.error))
-      });
-      let table = Table::new(rows, widths)
-        .header(header_row.clone())
-        .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
-      let footer = match error.as_ref().or(action_error.as_ref()) {
+    let rows =
+      cells
+        .iter()
+        .zip(&self.snapshot.torrents)
+        .map(|(row, torrent)| {
+          table_row(row.each_ref().map(String::as_str))
+            .style(error_style(torrent.error))
+        });
+    let table = Table::new(rows, widths)
+      .header(table_row(HEADERS).bold())
+      .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
+    let footer =
+      match self.refresh_error.as_ref().or(self.action_error.as_ref()) {
         Some(error) => Line::from(format!("Error: {error}")).red(),
-        None => Line::from(footer_text(&snapshot)),
+        None => Line::from(footer_text(&self.snapshot)),
       };
 
-      frame.render_stateful_widget(table, table_area, &mut selection);
-      frame.render_widget(footer, footer_area);
+    frame.render_stateful_widget(table, table_area, &mut self.selection);
+    frame.render_widget(footer, footer_area);
 
-      match (&mode, &details) {
-        (Mode::Help, _) => small_popup(frame, " Help ", help_text(&snapshot)),
-        (Mode::Details(_), Some(details)) => popup(
-          frame,
-          " Details ",
-          details_text(details),
-          Constraint::Percentage(80),
-        ),
-        (Mode::DeleteAskData(hash), _) => {
-          let text = Text::from(vec![
-            Line::from(torrent_name(&snapshot, hash)).bold(),
-            Line::from(
-              "Also delete its downloaded data? (y)es / (n)o / Esc to cancel",
-            ),
-          ]);
-          small_popup(frame, " Delete torrent ", text);
-        }
-        (Mode::DeleteConfirm { hash, delete_data }, _) => {
-          let mut text = Text::from(vec![
-            Line::from(torrent_name(&snapshot, hash)).bold(),
-            Line::from("Are you sure?"),
-          ]);
-          let title = if *delete_data {
-            text = text.red();
-            " Delete torrent and data "
-          } else {
-            " Delete torrent, keep data "
-          };
-          small_popup(frame, title, text);
-        }
-        _ => {}
+    match (&self.mode, &self.details) {
+      (Mode::Help, _) => {
+        small_popup(frame, " Help ", help_text(&self.snapshot))
       }
-    })?;
-
-    let timeout = next_refresh.saturating_duration_since(Instant::now());
-    if event::poll(timeout)?
-      && let Event::Key(key) = event::read()?
-      && key.kind == KeyEventKind::Press
-    {
-      action_error = None;
-      let selected = selection
-        .selected()
-        .and_then(|index| snapshot.torrents.get(index));
-      let mut action = None;
-      let shift = key.modifiers.contains(KeyModifiers::SHIFT);
-      match (&mode, key.code) {
-        (Mode::DeleteAskData(hash), KeyCode::Char(answer @ ('y' | 'n'))) => {
-          mode = Mode::DeleteConfirm {
-            hash: hash.clone(),
-            delete_data: answer == 'y',
-          }
-        }
-        (Mode::DeleteAskData(_), KeyCode::Esc) => mode = Mode::List,
-        (Mode::DeleteAskData(_), _) => {}
-        (Mode::DeleteConfirm { hash, delete_data }, KeyCode::Char('y')) => {
-          match delete_torrent(rpc, hash, *delete_data) {
-            Ok(()) => next_refresh = Instant::now(),
-            Err(e) => action_error = Some(e.to_string()),
-          }
-          mode = Mode::List;
-        }
-        // Just for safety measures, anything that isn't `y` during deletion
-        // confirmation cancels the action.
-        (Mode::DeleteConfirm { .. }, _) => mode = Mode::List,
-        (_, KeyCode::Char('q')) => return Ok(()),
-        (Mode::Help, KeyCode::Char('h') | KeyCode::F(1)) => mode = Mode::List,
-        (_, KeyCode::Char('h') | KeyCode::F(1)) => mode = Mode::Help,
-        (_, KeyCode::Esc) => mode = Mode::List,
-        (Mode::Help | Mode::Details(_), _) => {}
-        (_, KeyCode::Up) if shift => action = Some("queue-move-up"),
-        (_, KeyCode::Down) if shift => action = Some("queue-move-down"),
-        (_, KeyCode::Char('K')) => action = Some("queue-move-up"),
-        (_, KeyCode::Char('J')) => action = Some("queue-move-down"),
-        (_, KeyCode::Up | KeyCode::Char('k')) => selection.select_previous(),
-        (_, KeyCode::Down | KeyCode::Char('j')) => selection.select_next(),
-        (_, KeyCode::Enter | KeyCode::Char('i')) => {
-          if let Some(torrent) = selected {
-            match fetch_details(rpc, &torrent.hash_string) {
-              Ok(Some(new)) => {
-                details = Some(new);
-                mode = Mode::Details(torrent.hash_string.clone());
-              }
-              Ok(None) => {}
-              Err(e) => action_error = Some(e.to_string()),
-            }
-          }
-        }
-        (_, KeyCode::Char('a')) => {
-          match read_line(terminal, "Add torrent (magnet, URL or path)", "") {
-            Ok(Some(source)) if !source.trim().is_empty() => {
-              match add_torrent(rpc, &expand_home(source.trim())) {
-                Ok(()) => next_refresh = Instant::now(),
-                Err(e) => action_error = Some(e.to_string()),
-              }
-            }
-            Ok(_) => {}
-            Err(e) => action_error = Some(e.to_string()),
-          }
-        }
-        (_, KeyCode::Char('m')) => {
-          if let Some(torrent) = selected {
-            match read_line(terminal, "Move data to", &torrent.download_dir) {
-              Ok(Some(location)) if !location.trim().is_empty() => {
-                let location = expand_home(location.trim());
-                if Path::new(&location) != Path::new(&torrent.download_dir) {
-                  match move_torrent(rpc, &torrent.hash_string, &location) {
-                    Ok(()) => next_refresh = Instant::now(),
-                    Err(e) => action_error = Some(e.to_string()),
-                  }
-                }
-              }
-              Ok(_) => {}
-              Err(e) => action_error = Some(e.to_string()),
-            }
-          }
-        }
-        (_, KeyCode::Char('r')) => {
-          if let Some(torrent) = selected {
-            match read_line(terminal, "Rename torrent", &torrent.name) {
-              Ok(Some(name))
-                if !name.trim().is_empty() && name != torrent.name =>
-              {
-                let hash = &torrent.hash_string;
-                match rename_torrent(rpc, hash, &torrent.name, name.trim()) {
-                  Ok(()) => next_refresh = Instant::now(),
-                  Err(e) => action_error = Some(e.to_string()),
-                }
-              }
-              Ok(_) => {}
-              Err(e) => action_error = Some(e.to_string()),
-            }
-          }
-        }
-        (_, KeyCode::Char('d') | KeyCode::Delete | KeyCode::Backspace) => {
-          if let Some(torrent) = selected {
-            mode = Mode::DeleteAskData(torrent.hash_string.clone());
-          }
-        }
-        (_, KeyCode::Char('s')) => {
-          action = selected.map(|torrent| match torrent.status {
-            TorrentStatus::Stopped => "torrent-start",
-            _ => "torrent-stop",
-          })
-        }
-        (_, KeyCode::Char('S')) => action = Some("torrent-start-now"),
-        (_, KeyCode::Char('v')) => action = Some("torrent-verify"),
-        // Intentionally hidden from docs / Help popup.
-        (_, KeyCode::Char('ç')) => {
-          match auto_sort_by_ratio(rpc, &snapshot.torrents) {
-            Ok(()) => next_refresh = Instant::now(),
-            Err(e) => action_error = Some(e.to_string()),
-          }
-        }
-        _ => {}
+      (Mode::Details(_), Some(details)) => popup(
+        frame,
+        " Details ",
+        details_text(details),
+        Constraint::Percentage(80),
+      ),
+      (Mode::DeleteAskData(hash), _) => {
+        let text = Text::from(vec![
+          Line::from(torrent_name(&self.snapshot, hash)).bold(),
+          Line::from(
+            "Also delete its downloaded data? (y)es / (n)o / Esc to cancel",
+          ),
+        ]);
+        small_popup(frame, " Delete torrent ", text);
       }
-
-      if let (Some(method), Some(torrent)) = (action, selected) {
-        match torrent_action(rpc, method, &torrent.hash_string) {
-          Ok(()) => next_refresh = Instant::now(),
-          Err(e) => action_error = Some(e.to_string()),
-        }
+      (Mode::DeleteConfirm { hash, delete_data }, _) => {
+        let mut text = Text::from(vec![
+          Line::from(torrent_name(&self.snapshot, hash)).bold(),
+          Line::from("Are you sure?"),
+        ]);
+        let title = if *delete_data {
+          text = text.red();
+          " Delete torrent and data "
+        } else {
+          " Delete torrent, keep data "
+        };
+        small_popup(frame, title, text);
       }
+      _ => {}
     }
-  }
-}
-
-fn keep_selected_torrent(
-  selection: &mut TableState,
-  old: &[Torrent],
-  new: &[Torrent],
-) {
-  let selected = selection.selected().and_then(|index| old.get(index));
-  // If the torrent is gone, the selection keeps its row number.
-  if let Some(index) = selected.and_then(|selected| {
-    new
-      .iter()
-      .position(|torrent| torrent.hash_string == selected.hash_string)
-  }) {
-    selection.select(Some(index));
   }
 }
 
@@ -330,56 +115,6 @@ fn torrent_name(snapshot: &Snapshot, hash: &str) -> String {
     .iter()
     .find(|torrent| torrent.hash_string == hash)
     .map_or_else(|| hash.to_owned(), |torrent| torrent.name.clone())
-}
-
-fn read_line(
-  terminal: &mut DefaultTerminal,
-  label: &str,
-  initial: &str,
-) -> Result<Option<String>, Box<dyn Error>> {
-  let height = terminal.size()?.height;
-  disable_raw_mode()?;
-  execute!(
-    io::stdout(),
-    MoveTo(0, height.saturating_sub(2)),
-    ClearTerminal(ClearType::CurrentLine),
-    Print(label),
-    MoveTo(0, height.saturating_sub(1)),
-    ClearTerminal(ClearType::CurrentLine),
-    Show,
-  )?;
-  let line = edit_line(initial);
-  enable_raw_mode()?;
-  terminal.clear()?;
-  match line {
-    Ok(line) => Ok(Some(line)),
-    Err(ReadlineError::Interrupted | ReadlineError::Eof) => Ok(None),
-    Err(e) => Err(e.into()),
-  }
-}
-
-fn edit_line(initial: &str) -> rustyline::Result<String> {
-  let mut editor = Editor::with_config(
-    Config::builder()
-      .completion_type(CompletionType::List)
-      .keyseq_timeout(Some(25))
-      .build(),
-  )?;
-  editor.set_helper(Some(PathHelper {
-    completer: FilenameCompleter::new(),
-  }));
-  editor.bind_sequence(
-    KeyEvent(rustyline::KeyCode::Esc, Modifiers::NONE),
-    Cmd::Interrupt,
-  );
-  editor.readline_with_initial(":", (initial, ""))
-}
-
-fn expand_home(path: &str) -> String {
-  match (path.strip_prefix("~/"), std::env::var("HOME")) {
-    (Some(rest), Ok(home)) => format!("{home}/{rest}"),
-    _ => path.to_owned(),
-  }
 }
 
 fn footer_text(snapshot: &Snapshot) -> String {

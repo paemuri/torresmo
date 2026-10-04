@@ -1,4 +1,6 @@
+mod app;
 mod format;
+mod prompt;
 mod rpc;
 mod transmission;
 mod ui;
@@ -20,6 +22,6 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), Box<dyn Error>> {
   let mut rpc = Rpc::new()?;
-  ratatui::run(|terminal| ui::show(terminal, &mut rpc))?;
+  ratatui::run(|terminal| app::show(terminal, &mut rpc))?;
   Ok(())
 }
