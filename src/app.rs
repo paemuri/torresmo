@@ -244,3 +244,57 @@ fn keep_selected_torrent(
     selection.select(Some(index));
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use serde_json::json;
+
+  use super::*;
+
+  fn torrent(hash: &str) -> Torrent {
+    serde_json::from_value(json!({
+      "hashString": hash,
+      "name": hash,
+      "downloadDir": "/downloads",
+      "status": 6,
+      "sizeWhenDone": 0,
+      "percentDone": 1,
+      "eta": -1,
+      "rateDownload": 0,
+      "rateUpload": 0,
+      "uploadRatio": 0,
+      "error": 0,
+      "queuePosition": 0
+    }))
+    .unwrap()
+  }
+
+  fn torrents(hashes: &[&str]) -> Vec<Torrent> {
+    hashes.iter().map(|hash| torrent(hash)).collect()
+  }
+
+  #[test]
+  fn selection_follows_a_moved_torrent() {
+    let mut selection = TableState::default().with_selected(Some(1));
+    let old = torrents(&["a", "b", "c"]);
+    let new = torrents(&["b", "a", "c"]);
+    keep_selected_torrent(&mut selection, &old, &new);
+    assert_eq!(selection.selected(), Some(0));
+  }
+
+  #[test]
+  fn selection_keeps_its_row_when_the_torrent_is_gone() {
+    let mut selection = TableState::default().with_selected(Some(1));
+    let old = torrents(&["a", "b", "c"]);
+    let new = torrents(&["a", "c"]);
+    keep_selected_torrent(&mut selection, &old, &new);
+    assert_eq!(selection.selected(), Some(1));
+  }
+
+  #[test]
+  fn selection_stays_on_the_first_row_after_an_empty_list() {
+    let mut selection = TableState::default().with_selected(Some(0));
+    keep_selected_torrent(&mut selection, &[], &torrents(&["a", "b"]));
+    assert_eq!(selection.selected(), Some(0));
+  }
+}

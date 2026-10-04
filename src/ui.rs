@@ -366,3 +366,31 @@ fn table_row<'a, T: Into<Line<'a>>>(cells: [T; COLUMNS]) -> Row<'a> {
     ratio.right_aligned(),
   ])
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn columns_fit_their_widest_cell_and_name_fills_the_rest() {
+    let cells = [[
+      "10",
+      "Foo",
+      "Downloading",
+      "1.5 GB",
+      "42",
+      "1h 23m",
+      "1.3 MB/s",
+      "",
+      "0.05",
+    ]
+    .map(String::from)];
+    let widths = column_widths(&cells);
+    assert_eq!(widths[NAME_COLUMN], Constraint::Fill(1));
+    assert_eq!(widths[0], Constraint::Length(2));
+    assert_eq!(widths[2], Constraint::Length(11));
+    // Columns wider in the header than in any cell keep the header's width.
+    assert_eq!(widths[4], Constraint::Length(2));
+    assert_eq!(widths[7], Constraint::Length(2));
+  }
+}

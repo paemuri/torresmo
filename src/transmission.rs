@@ -280,3 +280,102 @@ pub fn fetch_details(
     serde_json::from_value(reply["torrents"].take())?;
   Ok(torrents.into_iter().next())
 }
+
+#[cfg(test)]
+mod tests {
+  use serde_json::json;
+
+  use super::*;
+
+  #[test]
+  fn status_codes_map_to_variants() {
+    assert!(TorrentStatus::from(0) == TorrentStatus::Stopped);
+    assert!(TorrentStatus::from(4) == TorrentStatus::Downloading);
+    assert!(TorrentStatus::from(6) == TorrentStatus::Seeding);
+    assert!(TorrentStatus::from(7) == TorrentStatus::Unknown);
+  }
+
+  #[test]
+  fn torrent_parses_from_transmission_json() {
+    let torrent: Torrent = serde_json::from_value(json!({
+      "hashString": "c9e15763f722f23e98a29decdfae341b98d53056",
+      "name": "Foo",
+      "downloadDir": "/downloads",
+      "status": 6,
+      "sizeWhenDone": 1_500_000_000u64,
+      "percentDone": 1,
+      "eta": -1,
+      "rateDownload": 0,
+      "rateUpload": 17_600,
+      "uploadRatio": 15.1,
+      "error": 0,
+      "queuePosition": 3
+    }))
+    .unwrap();
+
+    assert_eq!(
+      torrent.hash_string,
+      "c9e15763f722f23e98a29decdfae341b98d53056"
+    );
+    assert_eq!(torrent.name, "Foo");
+    assert!(torrent.status == TorrentStatus::Seeding);
+    assert_eq!(torrent.percent_done, 1.0);
+    assert_eq!(torrent.eta, -1);
+    assert_eq!(torrent.rate_upload, 17_600);
+    assert_eq!(torrent.queue_position, 3);
+  }
+
+  #[test]
+  fn details_parse_without_version_dependent_fields() {
+    let details: TorrentDetails = serde_json::from_value(json!({
+      "name": "Foo",
+      "hashString": "c9e15763f722f23e98a29decdfae341b98d53056",
+      "downloadDir": "/downloads",
+      "isPrivate": false,
+      "creator": "",
+      "comment": "",
+      "status": 3,
+      "error": 3,
+      "errorString": "Please Verify Local Data! Piece #1591 is corrupt.",
+      "percentDone": 0.42,
+      "eta": 5000,
+      "rateDownload": 1_300_000,
+      "rateUpload": 0,
+      "peersConnected": 3,
+      "peersSendingToUs": 1,
+      "peersGettingFromUs": 0,
+      "queuePosition": 0,
+      "bandwidthPriority": 0,
+      "totalSize": 1_600_000_000u64,
+      "sizeWhenDone": 1_500_000_000u64,
+      "leftUntilDone": 870_000_000,
+      "downloadedEver": 630_000_000,
+      "uploadedEver": 0,
+      "corruptEver": 0,
+      "uploadRatio": -1,
+      "pieceCount": 1432,
+      "pieceSize": 1_048_576,
+      "addedDate": 1_700_000_000,
+      "doneDate": 0,
+      "activityDate": 1_700_000_100,
+      "secondsDownloading": 3600,
+      "secondsSeeding": 0,
+      "trackerStats": [{
+        "host": "tracker.example.org:1337",
+        "seederCount": -1,
+        "leecherCount": -1,
+        "hasAnnounced": false,
+        "lastAnnounceSucceeded": false,
+        "lastAnnounceResult": ""
+      }]
+    }))
+    .unwrap();
+
+    assert!(details.labels.is_none());
+    assert!(details.file_count.is_none());
+    assert!(details.status == TorrentStatus::DownloadQueued);
+    assert_eq!(details.upload_ratio, -1.0);
+    assert_eq!(details.tracker_stats.len(), 1);
+    assert_eq!(details.tracker_stats[0].host, "tracker.example.org:1337");
+  }
+}

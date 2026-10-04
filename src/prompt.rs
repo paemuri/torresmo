@@ -72,3 +72,25 @@ pub fn expand_home(path: &str) -> String {
     _ => path.to_owned(),
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn expands_a_leading_tilde_slash() {
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(expand_home("~/movies"), format!("{home}/movies"));
+  }
+
+  #[test]
+  fn leaves_other_paths_alone() {
+    assert_eq!(expand_home("/downloads"), "/downloads");
+    assert_eq!(
+      expand_home("magnet:?xt=urn:btih:abc"),
+      "magnet:?xt=urn:btih:abc"
+    );
+    assert_eq!(expand_home("~other/movies"), "~other/movies");
+    assert_eq!(expand_home("~"), "~");
+  }
+}

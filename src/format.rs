@@ -83,3 +83,86 @@ pub fn truncate(text: &str, width: usize) -> String {
   }
   truncated
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn bytes_use_decimal_units() {
+    assert_eq!(format_bytes(0), "0 B");
+    assert_eq!(format_bytes(999), "999 B");
+    assert_eq!(format_bytes(1000), "1.0 kB");
+    assert_eq!(format_bytes(1_234_567), "1.2 MB");
+    assert_eq!(format_bytes(4_200_000_000), "4.2 GB");
+  }
+
+  #[test]
+  fn bytes_round_up_into_the_next_unit() {
+    assert_eq!(format_bytes(999_949), "999.9 kB");
+    assert_eq!(format_bytes(999_950), "1.0 MB");
+  }
+
+  #[test]
+  fn bytes_stop_at_terabytes() {
+    assert_eq!(format_bytes(u64::MAX), "18446744.1 TB");
+  }
+
+  #[test]
+  fn speed_hides_zero() {
+    assert_eq!(format_speed(0), "");
+    assert_eq!(format_speed(1500), "1.5 kB/s");
+  }
+
+  #[test]
+  fn duration_shows_the_two_largest_units() {
+    assert_eq!(format_duration(0), "0s");
+    assert_eq!(format_duration(59), "59s");
+    assert_eq!(format_duration(61), "1m 1s");
+    assert_eq!(format_duration(3_600), "1h 0m");
+    assert_eq!(format_duration(5_000), "1h 23m");
+    assert_eq!(format_duration(90_000), "1d 1h");
+  }
+
+  #[test]
+  fn duration_is_a_dash_when_unknown() {
+    assert_eq!(format_duration(-1), "-");
+    assert_eq!(format_duration(-2), "-");
+  }
+
+  #[test]
+  fn ratio_handles_special_values() {
+    assert_eq!(format_ratio(-1.0), "-");
+    assert_eq!(format_ratio(-2.0), "∞");
+    assert_eq!(format_ratio(0.0), "0.00");
+    assert_eq!(format_ratio(15.1), "15.10");
+  }
+
+  #[test]
+  fn queued_states_share_one_label() {
+    assert_eq!(status_label(TorrentStatus::VerifyQueued), "Queued");
+    assert_eq!(status_label(TorrentStatus::DownloadQueued), "Queued");
+    assert_eq!(status_label(TorrentStatus::SeedQueued), "Queued");
+    assert_eq!(status_label(TorrentStatus::Seeding), "Seeding");
+  }
+
+  #[test]
+  fn truncate_keeps_text_that_fits() {
+    assert_eq!(truncate("abc", 3), "abc");
+    assert_eq!(truncate("abc", 10), "abc");
+  }
+
+  #[test]
+  fn truncate_ends_with_an_ellipsis() {
+    assert_eq!(truncate("abcdef", 4), "abc…");
+    assert_eq!(truncate("abcdef", 1), "…");
+    assert_eq!(truncate("abcdef", 0), "");
+  }
+
+  #[test]
+  fn truncate_counts_terminal_cells() {
+    // Each of these characters takes two cells.
+    assert_eq!(truncate("日本語", 5), "日本…");
+    assert_eq!(truncate("日本語", 4), "日…");
+  }
+}

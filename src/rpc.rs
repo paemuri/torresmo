@@ -83,3 +83,37 @@ fn root_cause(error: &dyn Error) -> String {
   }
   cause.to_string()
 }
+
+#[cfg(test)]
+mod tests {
+  use std::{fmt, io};
+
+  use super::*;
+
+  #[derive(Debug)]
+  struct Wrapper(io::Error);
+
+  impl fmt::Display for Wrapper {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+      write!(f, "error sending request")
+    }
+  }
+
+  impl Error for Wrapper {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+      Some(&self.0)
+    }
+  }
+
+  #[test]
+  fn root_cause_is_the_deepest_error() {
+    let error = Wrapper(io::Error::other("Connection refused"));
+    assert_eq!(root_cause(&error), "Connection refused");
+  }
+
+  #[test]
+  fn root_cause_of_a_plain_error_is_itself() {
+    let error = io::Error::other("timed out");
+    assert_eq!(root_cause(&error), "timed out");
+  }
+}
