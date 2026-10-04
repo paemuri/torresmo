@@ -16,6 +16,7 @@ use reqwest::blocking::{Client, Response};
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 const URL: &str = "http://localhost:9091/transmission/rpc";
 const SESSION_HEADER: &str = "X-Transmission-Session-Id";
@@ -119,9 +120,19 @@ fn show(
 
   loop {
     terminal.draw(|frame| {
-      let cells: Vec<[String; 8]> =
+      let [table_area, footer_area] =
+        Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
+          .areas(frame.area());
+
+      let mut cells: Vec<[String; 8]> =
         snapshot.torrents.iter().map(torrent_cells).collect();
       let widths = column_widths(&cells);
+      let [name_area, ..] =
+        Layout::horizontal(widths).spacing(1).areas::<8>(table_area);
+      for row in &mut cells {
+        row[0] = truncate(&row[0], name_area.width.into());
+      }
+
       let rows = cells
         .iter()
         .map(|row| table_row(row.each_ref().map(String::as_str)));
@@ -133,9 +144,6 @@ fn show(
         None => Line::from(footer_text(&snapshot)),
       };
 
-      let [table_area, footer_area] =
-        Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
-          .areas(frame.area());
       frame.render_stateful_widget(table, table_area, &mut selection);
       frame.render_widget(footer, footer_area);
 
@@ -232,6 +240,26 @@ fn column_widths(cells: &[[String; 8]]) -> [Constraint; 8] {
   let mut constraints = widths.map(|width| Constraint::Length(width as u16));
   constraints[0] = Constraint::Fill(1);
   constraints
+}
+
+fn truncate(text: &str, width: usize) -> String {
+  if text.width() <= width {
+    return text.to_owned();
+  }
+  let mut truncated = String::new();
+  let mut used = 0;
+  for c in text.chars() {
+    let char_width = c.width().unwrap_or(0);
+    if used + char_width >= width {
+      break;
+    }
+    truncated.push(c);
+    used += char_width;
+  }
+  if width > 0 {
+    truncated.push('…');
+  }
+  truncated
 }
 
 fn table_row<'a, T: Into<Line<'a>>>(cells: [T; 8]) -> Row<'a> {
