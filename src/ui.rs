@@ -137,6 +137,7 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
       let selected = selection
         .selected()
         .and_then(|index| snapshot.torrents.get(index));
+      let mut action = None;
       match key.code {
         KeyCode::Char('q') => return Ok(()),
         KeyCode::Char('h') | KeyCode::F(1) if mode == Mode::Help => {
@@ -160,28 +161,21 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
           }
         }
         KeyCode::Char('s') => {
-          if let Some(torrent) = selected {
-            let method = if torrent.status == TorrentStatus::Stopped {
-              "torrent-start"
-            } else {
-              "torrent-stop"
-            };
-            match torrent_action(rpc, method, &torrent.hash_string) {
-              Ok(()) => next_refresh = Instant::now(),
-              Err(e) => action_error = Some(e.to_string()),
-            }
-          }
+          action = selected.map(|torrent| match torrent.status {
+            TorrentStatus::Stopped => "torrent-start",
+            _ => "torrent-stop",
+          });
         }
-        KeyCode::Char('S') => {
-          if let Some(torrent) = selected {
-            match torrent_action(rpc, "torrent-start-now", &torrent.hash_string)
-            {
-              Ok(()) => next_refresh = Instant::now(),
-              Err(e) => action_error = Some(e.to_string()),
-            }
-          }
-        }
+        KeyCode::Char('S') => action = Some("torrent-start-now"),
+        KeyCode::Char('v') => action = Some("torrent-verify"),
         _ => {}
+      }
+
+      if let (Some(method), Some(torrent)) = (action, selected) {
+        match torrent_action(rpc, method, &torrent.hash_string) {
+          Ok(()) => next_refresh = Instant::now(),
+          Err(e) => action_error = Some(e.to_string()),
+        }
       }
     }
   }
@@ -219,6 +213,7 @@ fn help_text(snapshot: &Snapshot) -> Text<'static> {
     field("Enter", "Show the torrent details".into(), 7),
     field("s", "Toggle pause (start/stop)".into(), 7),
     field("S", "Start now, skipping the queue".into(), 7),
+    field("v", "Verify the downloaded data".into(), 7),
     field("Esc", "Close the popup".into(), 7),
     field("h", "Show help/info".into(), 7),
     field("q", "Quit".into(), 7),
