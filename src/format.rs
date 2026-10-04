@@ -1,0 +1,80 @@
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+pub fn format_bytes(bytes: u64) -> String {
+  // Decimal units (1 kB = 1000 B), the same as Transmission's own clients.
+  const UNITS: [&str; 4] = ["kB", "MB", "GB", "TB"];
+  if bytes < 1000 {
+    return format!("{bytes} B");
+  }
+  let mut value = bytes as f64 / 1000.0;
+  let mut unit = 0;
+  while value >= 1000.0 && unit < UNITS.len() - 1 {
+    value /= 1000.0;
+    unit += 1;
+  }
+  format!("{value:.1} {}", UNITS[unit])
+}
+
+pub fn format_speed(bytes_per_second: u64) -> String {
+  if bytes_per_second == 0 {
+    return String::new();
+  }
+  format!("{}/s", format_bytes(bytes_per_second))
+}
+
+pub fn format_eta(seconds: i64) -> String {
+  // Transmission sends -1 (not available) and -2 (unknown) for the ETA.
+  if seconds < 0 {
+    return "-".to_owned();
+  }
+  let (days, hours) = (seconds / 86_400, seconds / 3_600 % 24);
+  let (minutes, secs) = (seconds / 60 % 60, seconds % 60);
+  match (days, hours, minutes) {
+    (0, 0, 0) => format!("{secs}s"),
+    (0, 0, _) => format!("{minutes}m {secs}s"),
+    (0, _, _) => format!("{hours}h {minutes}m"),
+    _ => format!("{days}d {hours}h"),
+  }
+}
+
+pub fn format_ratio(ratio: f64) -> String {
+  // Transmission sends -1 (not available) and -2 (infinite) for the ratio.
+  match ratio {
+    -1.0 => "-".to_owned(),
+    -2.0 => "∞".to_owned(),
+    _ => format!("{ratio:.2}"),
+  }
+}
+
+pub fn status_label(status: u64) -> &'static str {
+  match status {
+    0 => "Stopped",
+    1 => "Queued", // Verify queued.
+    2 => "Verifying",
+    3 => "Queued", // Download queued.
+    4 => "Downloading",
+    5 => "Queued", // Seed queued.
+    6 => "Seeding",
+    _ => "Unknown",
+  }
+}
+
+pub fn truncate(text: &str, width: usize) -> String {
+  if text.width() <= width {
+    return text.to_owned();
+  }
+  let mut truncated = String::new();
+  let mut used = 0;
+  for c in text.chars() {
+    let char_width = c.width().unwrap_or(0);
+    if used + char_width >= width {
+      break;
+    }
+    truncated.push(c);
+    used += char_width;
+  }
+  if width > 0 {
+    truncated.push('…');
+  }
+  truncated
+}
