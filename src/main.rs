@@ -6,8 +6,9 @@ use std::time::Duration;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Color, Style};
-use ratatui::widgets::{List, ListState};
+use ratatui::style::{Color, Style, Stylize};
+use ratatui::text::Line;
+use ratatui::widgets::{Row, Table, TableState};
 use reqwest::StatusCode;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::HeaderValue;
@@ -47,7 +48,12 @@ fn run() -> Result<(), Box<dyn Error>> {
     let name = torrent["name"].as_str().unwrap_or("?");
     let done = torrent["percentDone"].as_f64().unwrap_or(0.0) * 100.0;
     let status = status_label(torrent["status"].as_u64());
-    rows.push(format!("{id:>4} {status:<15} {done:>5.1}% {name}"));
+    rows.push([
+      id.to_string(),
+      status.to_owned(),
+      format!("{done:.1}%"),
+      name.to_owned(),
+    ]);
   }
 
   ratatui::run(|terminal| show(terminal, &header, &rows))?;
@@ -58,19 +64,32 @@ fn run() -> Result<(), Box<dyn Error>> {
 fn show(
   terminal: &mut DefaultTerminal,
   header: &str,
-  rows: &[String],
+  rows: &[[String; 4]],
 ) -> io::Result<()> {
-  let list = List::new(rows.iter().map(String::as_str))
-    .highlight_style(Style::new().bg(Color::White).fg(Color::Black));
-  let mut selection = ListState::default().with_selected(Some(0));
+  let widths = [
+    Constraint::Length(4),
+    Constraint::Length(15),
+    Constraint::Length(8),
+    Constraint::Fill(1),
+  ];
+  let header_row = Row::new([
+    Line::from("#").right_aligned(),
+    Line::from("State"),
+    Line::from("Progress").right_aligned(),
+    Line::from("Name"),
+  ]);
+  let table = Table::new(rows.iter().map(table_row), widths)
+    .header(header_row.bold())
+    .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
+  let mut selection = TableState::default().with_selected(Some(0));
 
   loop {
     terminal.draw(|frame| {
-      let [header_area, list_area] =
+      let [header_area, table_area] =
         Layout::vertical([Constraint::Length(1), Constraint::Fill(1)])
           .areas(frame.area());
       frame.render_widget(header, header_area);
-      frame.render_stateful_widget(&list, list_area, &mut selection);
+      frame.render_stateful_widget(&table, table_area, &mut selection);
     })?;
 
     if let Event::Key(key) = event::read()?
@@ -84,6 +103,15 @@ fn show(
       }
     }
   }
+}
+
+fn table_row([id, status, progress, name]: &[String; 4]) -> Row<'_> {
+  Row::new([
+    Line::from(id.as_str()).right_aligned(),
+    Line::from(status.as_str()),
+    Line::from(progress.as_str()).right_aligned(),
+    Line::from(name.as_str()),
+  ])
 }
 
 fn status_label(status: Option<u64>) -> &'static str {
