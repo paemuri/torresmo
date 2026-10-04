@@ -1,10 +1,17 @@
+use std::error::Error;
 use std::io;
 use std::time::{Duration, Instant};
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
+use ratatui::crossterm::cursor::{MoveTo, Show};
 use ratatui::crossterm::event::{
   self, Event, KeyCode, KeyEventKind, KeyModifiers,
+};
+use ratatui::crossterm::execute;
+use ratatui::crossterm::style::Print;
+use ratatui::crossterm::terminal::{
+  Clear as ClearTerminal, ClearType, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Style, Stylize};
@@ -13,14 +20,20 @@ use ratatui::widgets::{
   Block, Clear, Padding, Paragraph, Row, Table, TableState, Wrap,
 };
 use ratatui::{DefaultTerminal, Frame};
+use rustyline::completion::FilenameCompleter;
+use rustyline::error::ReadlineError;
+use rustyline::{
+  Completer, CompletionType, Config, Editor, Helper, Highlighter, Hinter,
+  Validator,
+};
 
 use crate::format::{
   format_bytes, format_eta, format_ratio, format_speed, status_label, truncate,
 };
 use crate::rpc::Rpc;
 use crate::transmission::{
-  Snapshot, Torrent, TorrentDetails, TorrentStatus, auto_sort_by_ratio,
-  delete_torrent, fetch, fetch_details, torrent_action,
+  Snapshot, Torrent, TorrentDetails, TorrentStatus, add_torrent,
+  auto_sort_by_ratio, delete_torrent, fetch, fetch_details, torrent_action,
 };
 
 const REFRESH: Duration = Duration::from_secs(1);
@@ -37,6 +50,12 @@ enum Mode {
   Details(String),
   DeleteAskData(String),
   DeleteConfirm { hash: String, delete_data: bool },
+}
+
+#[derive(Helper, Completer, Highlighter, Hinter, Validator)]
+struct PathHelper {
+  #[rustyline(Completer)]
+  completer: FilenameCompleter,
 }
 
 pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
@@ -190,6 +209,18 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
             }
           }
         }
+        (_, KeyCode::Char('a')) => {
+          match read_line(terminal, "Add torrent (magnet, URL or path)") {
+            Ok(Some(source)) if !source.trim().is_empty() => {
+              match add_torrent(rpc, &expand_home(source.trim())) {
+                Ok(()) => next_refresh = Instant::now(),
+                Err(e) => action_error = Some(e.to_string()),
+              }
+            }
+            Ok(_) => {}
+            Err(e) => action_error = Some(e.to_string()),
+          }
+        }
         (_, KeyCode::Char('d') | KeyCode::Delete | KeyCode::Backspace) => {
           if let Some(torrent) = selected {
             mode = Mode::DeleteAskData(torrent.hash_string.clone());
@@ -265,6 +296,50 @@ fn torrent_name(snapshot: &Snapshot, hash: &str) -> String {
     .map_or_else(|| hash.to_owned(), |torrent| torrent.name.clone())
 }
 
+fn read_line(
+  terminal: &mut DefaultTerminal,
+  label: &str,
+) -> Result<Option<String>, Box<dyn Error>> {
+  let height = terminal.size()?.height;
+  disable_raw_mode()?;
+  execute!(
+    io::stdout(),
+    MoveTo(0, height.saturating_sub(2)),
+    ClearTerminal(ClearType::CurrentLine),
+    Print(label),
+    MoveTo(0, height.saturating_sub(1)),
+    ClearTerminal(ClearType::CurrentLine),
+    Show,
+  )?;
+  let line = edit_line();
+  enable_raw_mode()?;
+  terminal.clear()?;
+  match line {
+    Ok(line) => Ok(Some(line)),
+    Err(ReadlineError::Interrupted | ReadlineError::Eof) => Ok(None),
+    Err(e) => Err(e.into()),
+  }
+}
+
+fn edit_line() -> rustyline::Result<String> {
+  let mut editor = Editor::with_config(
+    Config::builder()
+      .completion_type(CompletionType::List)
+      .build(),
+  )?;
+  editor.set_helper(Some(PathHelper {
+    completer: FilenameCompleter::new(),
+  }));
+  editor.readline(":")
+}
+
+fn expand_home(path: &str) -> String {
+  match (path.strip_prefix("~/"), std::env::var("HOME")) {
+    (Some(rest), Ok(home)) => format!("{home}/{rest}"),
+    _ => path.to_owned(),
+  }
+}
+
 fn footer_text(snapshot: &Snapshot) -> String {
   format!(
     "press h for help | ↓ {}/s ↑ {}/s | ↓ {} ↑ {} total",
@@ -283,6 +358,7 @@ fn help_text(snapshot: &Snapshot) -> Text<'static> {
     field("s", "Toggle pause (start/stop)".into(), 17),
     field("S", "Start now, skipping the queue".into(), 17),
     field("v", "Verify the downloaded data".into(), 17),
+    field("a", "Add a torrent".into(), 17),
     field("d / Del / Bksp", "Delete the torrent".into(), 17),
     field("Esc", "Close the popup".into(), 17),
     field("h / F1", "Show help".into(), 17),

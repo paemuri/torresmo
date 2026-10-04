@@ -165,6 +165,14 @@ pub fn torrent_action(
   Ok(())
 }
 
+pub fn add_torrent(rpc: &mut Rpc, source: &str) -> Result<(), Box<dyn Error>> {
+  let reply = rpc.call("torrent-add", json!({ "filename": source }))?;
+  if let Some(name) = reply["torrent-duplicate"]["name"].as_str() {
+    return Err(format!("Already added: {name}").into());
+  }
+  Ok(())
+}
+
 pub fn delete_torrent(
   rpc: &mut Rpc,
   hash: &str,
