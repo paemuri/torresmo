@@ -19,8 +19,8 @@ use crate::format::{
 };
 use crate::rpc::Rpc;
 use crate::transmission::{
-  Snapshot, Torrent, TorrentDetails, TorrentStatus, delete_torrent, fetch,
-  fetch_details, torrent_action,
+  Snapshot, Torrent, TorrentDetails, TorrentStatus, auto_sort_by_ratio,
+  delete_torrent, fetch, fetch_details, torrent_action,
 };
 
 const REFRESH: Duration = Duration::from_secs(1);
@@ -203,6 +203,13 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
         }
         (_, KeyCode::Char('S')) => action = Some("torrent-start-now"),
         (_, KeyCode::Char('v')) => action = Some("torrent-verify"),
+        // Intentionally hidden from docs / Help popup.
+        (_, KeyCode::Char('ç')) => {
+          match auto_sort_by_ratio(rpc, &snapshot.torrents) {
+            Ok(()) => next_refresh = Instant::now(),
+            Err(e) => action_error = Some(e.to_string()),
+          }
+        }
         _ => {}
       }
 

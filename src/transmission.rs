@@ -177,6 +177,27 @@ pub fn delete_torrent(
   Ok(())
 }
 
+pub fn auto_sort_by_ratio(
+  rpc: &mut Rpc,
+  torrents: &[Torrent],
+) -> Result<(), Box<dyn Error>> {
+  let rank = |torrent: &Torrent| {
+    // Transmission sends -1 (not available) and -2 (infinite) for the ratio.
+    match torrent.upload_ratio {
+      -2.0 => f64::INFINITY,
+      ratio => ratio.max(0.0),
+    }
+  };
+
+  let mut by_ratio: Vec<&Torrent> = torrents.iter().collect();
+  by_ratio.sort_by(|a, b| rank(a).total_cmp(&rank(b)));
+  // Each move puts the torrent at #1, so the lowest ratio has to go last.
+  for torrent in by_ratio.iter().rev() {
+    rpc.call("queue-move-top", json!({ "ids": [torrent.hash_string] }))?;
+  }
+  Ok(())
+}
+
 pub fn fetch_details(
   rpc: &mut Rpc,
   hash: &str,
