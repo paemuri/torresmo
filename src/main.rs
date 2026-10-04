@@ -20,6 +20,8 @@ use serde_json::{Value, json};
 const URL: &str = "http://localhost:9091/transmission/rpc";
 const SESSION_HEADER: &str = "X-Transmission-Session-Id";
 const REFRESH: Duration = Duration::from_secs(1);
+const HEADERS: [&str; 8] =
+  ["Name", "State", "Size", "%", "ETA", "Down", "Up", "Ratio"];
 
 fn main() -> ExitCode {
   match run() {
@@ -109,20 +111,7 @@ fn show(
   rpc: &mut Rpc,
   mut snapshot: Snapshot,
 ) -> io::Result<()> {
-  let widths = [
-    Constraint::Fill(1),
-    Constraint::Length(15),
-    Constraint::Length(8),
-    Constraint::Length(8),
-    Constraint::Length(7),
-    Constraint::Length(10),
-    Constraint::Length(10),
-    Constraint::Length(6),
-  ];
-  let header_row = table_row([
-    "Name", "State", "Size", "Progress", "ETA", "Down", "Up", "Ratio",
-  ])
-  .bold();
+  let header_row = table_row(HEADERS).bold();
   let mut selection = TableState::default().with_selected(Some(0));
   let mut show_help = false;
   let mut error: Option<String> = None;
@@ -130,10 +119,12 @@ fn show(
 
   loop {
     terminal.draw(|frame| {
-      let rows = snapshot
-        .torrents
+      let cells: Vec<[String; 8]> =
+        snapshot.torrents.iter().map(torrent_cells).collect();
+      let widths = column_widths(&cells);
+      let rows = cells
         .iter()
-        .map(|torrent| table_row(torrent_cells(torrent)));
+        .map(|row| table_row(row.each_ref().map(String::as_str)));
       let table = Table::new(rows, widths)
         .header(header_row.clone())
         .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
@@ -223,12 +214,24 @@ fn torrent_cells(torrent: &Torrent) -> [String; 8] {
     torrent.name.clone(),
     status_label(torrent.status).to_owned(),
     format_bytes(torrent.size_when_done),
-    format!("{:.1}%", torrent.percent_done * 100.0),
+    format!("{:.0}", (torrent.percent_done * 100.0).floor()),
     format_eta(torrent.eta),
     format_speed(torrent.rate_download),
     format_speed(torrent.rate_upload),
     format_ratio(torrent.upload_ratio),
   ]
+}
+
+fn column_widths(cells: &[[String; 8]]) -> [Constraint; 8] {
+  let mut widths = HEADERS.map(|header| Line::from(header).width());
+  for row in cells {
+    for (width, cell) in widths.iter_mut().zip(row) {
+      *width = (*width).max(Line::from(cell.as_str()).width());
+    }
+  }
+  let mut constraints = widths.map(|width| Constraint::Length(width as u16));
+  constraints[0] = Constraint::Fill(1);
+  constraints
 }
 
 fn table_row<'a, T: Into<Line<'a>>>(cells: [T; 8]) -> Row<'a> {
@@ -296,11 +299,11 @@ fn format_ratio(ratio: f64) -> String {
 fn status_label(status: u64) -> &'static str {
   match status {
     0 => "Stopped",
-    1 => "Verify queued",
+    1 => "Queued", // Verify queued.
     2 => "Verifying",
-    3 => "Download queued",
+    3 => "Queued", // Download queued.
     4 => "Downloading",
-    5 => "Seed queued",
+    5 => "Queued", // Seed queued.
     6 => "Seeding",
     _ => "Unknown",
   }
