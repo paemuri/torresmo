@@ -172,6 +172,15 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
             }
           }
         }
+        KeyCode::Char('S') => {
+          if let Some(torrent) = selected {
+            match torrent_action(rpc, "torrent-start-now", &torrent.hash_string)
+            {
+              Ok(()) => next_refresh = Instant::now(),
+              Err(e) => action_error = Some(e.to_string()),
+            }
+          }
+        }
         _ => {}
       }
     }
@@ -209,6 +218,7 @@ fn help_text(snapshot: &Snapshot) -> Text<'static> {
     field("↑ ↓", "Move the selection".into(), 7),
     field("Enter", "Show the torrent details".into(), 7),
     field("s", "Toggle pause (start/stop)".into(), 7),
+    field("S", "Start now, skipping the queue".into(), 7),
     field("Esc", "Close the popup".into(), 7),
     field("h", "Show help/info".into(), 7),
     field("q", "Quit".into(), 7),
