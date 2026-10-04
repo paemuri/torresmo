@@ -59,8 +59,7 @@ fn run() -> Result<(), Box<dyn Error>> {
   let help = format!(
     "↑ ↓  Move the selection\n\
      h    Show help/info\n\
-     q    Quit
-
+     q    Quit\n\n\
      Download folder  {download_dir}\n\
      Transmission     {version}\n\
      Torresmo         {}",
