@@ -152,6 +152,15 @@ pub fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
   })
 }
 
+pub fn torrent_action(
+  rpc: &mut Rpc,
+  method: &str,
+  hash: &str,
+) -> Result<(), Box<dyn Error>> {
+  rpc.call(method, json!({ "ids": [hash] }))?;
+  Ok(())
+}
+
 pub fn fetch_details(
   rpc: &mut Rpc,
   hash: &str,

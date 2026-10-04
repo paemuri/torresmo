@@ -17,7 +17,8 @@ use crate::format::{
 };
 use crate::rpc::Rpc;
 use crate::transmission::{
-  Snapshot, Torrent, TorrentDetails, fetch, fetch_details,
+  Snapshot, Torrent, TorrentDetails, TorrentStatus, fetch, fetch_details,
+  torrent_action,
 };
 
 const REFRESH: Duration = Duration::from_secs(1);
@@ -38,6 +39,7 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
   let mut mode = Mode::List;
   let mut details: Option<TorrentDetails> = None;
   let mut error: Option<String> = None;
+  let mut action_error: Option<String> = None;
   let mut next_refresh = Instant::now();
 
   loop {
@@ -85,7 +87,7 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
       let table = Table::new(rows, widths)
         .header(header_row.clone())
         .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
-      let footer = match &error {
+      let footer = match error.as_ref().or(action_error.as_ref()) {
         Some(error) => Line::from(format!("Error: {error}")).red(),
         None => Line::from(footer_text(&snapshot)),
       };
@@ -131,6 +133,10 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
       && let Event::Key(key) = event::read()?
       && key.kind == KeyEventKind::Press
     {
+      action_error = None;
+      let selected = selection
+        .selected()
+        .and_then(|index| snapshot.torrents.get(index));
       match key.code {
         KeyCode::Char('q') => return Ok(()),
         KeyCode::Char('h') | KeyCode::F(1) if mode == Mode::Help => {
@@ -142,16 +148,27 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
         KeyCode::Up => selection.select_previous(),
         KeyCode::Down => selection.select_next(),
         KeyCode::Enter => {
-          if let Some(torrent) =
-            selection.selected().and_then(|i| snapshot.torrents.get(i))
-          {
+          if let Some(torrent) = selected {
             match fetch_details(rpc, &torrent.hash_string) {
               Ok(Some(new)) => {
                 details = Some(new);
                 mode = Mode::Details(torrent.hash_string.clone());
               }
               Ok(None) => {}
-              Err(e) => error = Some(e.to_string()),
+              Err(e) => action_error = Some(e.to_string()),
+            }
+          }
+        }
+        KeyCode::Char('s') => {
+          if let Some(torrent) = selected {
+            let method = if torrent.status == TorrentStatus::Stopped {
+              "torrent-start"
+            } else {
+              "torrent-stop"
+            };
+            match torrent_action(rpc, method, &torrent.hash_string) {
+              Ok(()) => next_refresh = Instant::now(),
+              Err(e) => action_error = Some(e.to_string()),
             }
           }
         }
@@ -191,6 +208,7 @@ fn help_text(snapshot: &Snapshot) -> Text<'static> {
   Text::from(vec![
     field("↑ ↓", "Move the selection".into(), 7),
     field("Enter", "Show the torrent details".into(), 7),
+    field("s", "Toggle pause (start/stop)".into(), 7),
     field("Esc", "Close the popup".into(), 7),
     field("h", "Show help/info".into(), 7),
     field("q", "Quit".into(), 7),
