@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 
 const URL: &str = "http://localhost:9091/transmission/rpc";
 const SESSION_HEADER: &str = "X-Transmission-Session-Id";
+const HINTS: &str = "h help | q quit | ↑↓ select";
 
 fn main() -> ExitCode {
   match run() {
@@ -31,8 +32,25 @@ fn run() -> Result<(), Box<dyn Error>> {
   let mut rpc = Rpc::new()?;
 
   let session = rpc.call("session-get", json!({ "fields": ["version"] }))?;
-  let version = session["version"].as_str().unwrap_or("unknown");
-  let title = format!("Transmission is up (version {version})");
+  // The version looks like "1.2.3 (hash)"; the build hash is noise.
+  let version = session["version"]
+    .as_str()
+    .and_then(|version| version.split_whitespace().next())
+    .unwrap_or("unknown");
+
+  let stats = rpc.call("session-stats", json!({}))?;
+  let speed_down = stats["downloadSpeed"].as_u64().unwrap_or(0);
+  let speed_up = stats["uploadSpeed"].as_u64().unwrap_or(0);
+  let all_time = &stats["cumulative-stats"];
+  let total_down = all_time["downloadedBytes"].as_u64().unwrap_or(0);
+  let total_up = all_time["uploadedBytes"].as_u64().unwrap_or(0);
+  let footer = format!(
+    "↓ {}/s ↑ {}/s | all time ↓ {} ↑ {} | Transmission {version}",
+    format_bytes(speed_down),
+    format_bytes(speed_up),
+    format_bytes(total_down),
+    format_bytes(total_up),
+  );
 
   let fields = [
     "id",
@@ -74,14 +92,14 @@ fn run() -> Result<(), Box<dyn Error>> {
     ]);
   }
 
-  ratatui::run(|terminal| show(terminal, &title, &rows))?;
+  ratatui::run(|terminal| show(terminal, &footer, &rows))?;
 
   Ok(())
 }
 
 fn show(
   terminal: &mut DefaultTerminal,
-  title: &str,
+  footer: &str,
   rows: &[[String; 9]],
 ) -> io::Result<()> {
   let widths = [
@@ -107,14 +125,22 @@ fn show(
   .header(header_row.bold())
   .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
   let mut selection = TableState::default().with_selected(Some(0));
+  let hints = Line::from(HINTS).right_aligned();
 
   loop {
     terminal.draw(|frame| {
-      let [title_area, table_area] =
-        Layout::vertical([Constraint::Length(1), Constraint::Fill(1)])
+      let [table_area, footer_area] =
+        Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
           .areas(frame.area());
-      frame.render_widget(title, title_area);
+      let [stats_area, hints_area] = Layout::horizontal([
+        Constraint::Fill(1),
+        Constraint::Length(hints.width() as u16),
+      ])
+      .spacing(1)
+      .areas(footer_area);
       frame.render_stateful_widget(&table, table_area, &mut selection);
+      frame.render_widget(footer, stats_area);
+      frame.render_widget(&hints, hints_area);
     })?;
 
     if let Event::Key(key) = event::read()?
