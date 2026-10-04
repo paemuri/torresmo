@@ -7,8 +7,10 @@ use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Style, Stylize};
-use ratatui::text::Line;
-use ratatui::widgets::{Row, Table, TableState};
+use ratatui::text::{Line, Text};
+use ratatui::widgets::{
+  Block, Clear, Padding, Paragraph, Row, Table, TableState,
+};
 use reqwest::StatusCode;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::HeaderValue;
@@ -16,7 +18,8 @@ use serde_json::{Value, json};
 
 const URL: &str = "http://localhost:9091/transmission/rpc";
 const SESSION_HEADER: &str = "X-Transmission-Session-Id";
-const HINTS: &str = "h help | q quit | ↑↓ select";
+const KEYS: &str = "\
+";
 
 fn main() -> ExitCode {
   match run() {
@@ -49,11 +52,21 @@ fn run() -> Result<(), Box<dyn Error>> {
   let total_down = all_time["downloadedBytes"].as_u64().unwrap_or(0);
   let total_up = all_time["uploadedBytes"].as_u64().unwrap_or(0);
   let footer = format!(
-    "↓ {}/s ↑ {}/s | ↓ {} ↑ {} total | {download_dir} | v{version}",
+    "press h for help | ↓ {}/s ↑ {}/s | ↓ {} ↑ {} total",
     format_bytes(speed_down),
     format_bytes(speed_up),
     format_bytes(total_down),
     format_bytes(total_up),
+  );
+  let help = format!(
+    "↑ ↓  Move the selection\n\
+     h    Show help/info\n\
+     q    Quit
+
+     Download folder  {download_dir}\n\
+     Transmission     {version}\n\
+     Torresmo         {}",
+    env!("CARGO_PKG_VERSION"),
   );
 
   let fields = [
@@ -96,7 +109,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     ]);
   }
 
-  ratatui::run(|terminal| show(terminal, &footer, &rows))?;
+  ratatui::run(|terminal| show(terminal, &footer, &help, &rows))?;
 
   Ok(())
 }
@@ -104,6 +117,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 fn show(
   terminal: &mut DefaultTerminal,
   footer: &str,
+  help: &str,
   rows: &[[String; 9]],
 ) -> io::Result<()> {
   let widths = [
@@ -129,29 +143,41 @@ fn show(
   .header(header_row.bold())
   .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
   let mut selection = TableState::default().with_selected(Some(0));
-  let hints = Line::from(HINTS).right_aligned();
+
+  let help = Text::from(help);
+  let help_width = Constraint::Length(help.width() as u16 + 4);
+  let help_height = Constraint::Length(help.height() as u16 + 2);
+  let help = Paragraph::new(help).block(
+    Block::bordered()
+      .title(" Help ")
+      .padding(Padding::horizontal(1)),
+  );
+  let mut show_help = false;
 
   loop {
     terminal.draw(|frame| {
       let [table_area, footer_area] =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
           .areas(frame.area());
-      let [stats_area, hints_area] = Layout::horizontal([
-        Constraint::Fill(1),
-        Constraint::Length(hints.width() as u16),
-      ])
-      .spacing(1)
-      .areas(footer_area);
       frame.render_stateful_widget(&table, table_area, &mut selection);
-      frame.render_widget(footer, stats_area);
-      frame.render_widget(&hints, hints_area);
+      frame.render_widget(footer, footer_area);
+
+      if show_help {
+        let popup = frame.area().centered(help_width, help_height);
+        frame.render_widget(Clear, popup);
+        frame.render_widget(&help, popup);
+      }
     })?;
 
     if let Event::Key(key) = event::read()?
       && key.kind == KeyEventKind::Press
     {
       match key.code {
+        KeyCode::Char('h') => show_help = !show_help,
+        KeyCode::F(1) => show_help = true,
+        KeyCode::Esc => show_help = false,
         KeyCode::Char('q') => return Ok(()),
+        _ if show_help => {}
         KeyCode::Up => selection.select_previous(),
         KeyCode::Down => selection.select_next(),
         _ => {}
