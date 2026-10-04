@@ -23,8 +23,8 @@ use ratatui::{DefaultTerminal, Frame};
 use rustyline::completion::FilenameCompleter;
 use rustyline::error::ReadlineError;
 use rustyline::{
-  Completer, CompletionType, Config, Editor, Helper, Highlighter, Hinter,
-  Validator,
+  Cmd, Completer, CompletionType, Config, Editor, Helper, Highlighter, Hinter,
+  KeyEvent, Modifiers, Validator,
 };
 
 use crate::format::{
@@ -325,11 +325,16 @@ fn edit_line() -> rustyline::Result<String> {
   let mut editor = Editor::with_config(
     Config::builder()
       .completion_type(CompletionType::List)
+      .keyseq_timeout(Some(100))
       .build(),
   )?;
   editor.set_helper(Some(PathHelper {
     completer: FilenameCompleter::new(),
   }));
+  editor.bind_sequence(
+    KeyEvent(rustyline::KeyCode::Esc, Modifiers::NONE),
+    Cmd::Interrupt,
+  );
   editor.readline(":")
 }
 
