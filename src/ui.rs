@@ -24,11 +24,11 @@ const REFRESH: Duration = Duration::from_secs(1);
 const HEADERS: [&str; 8] =
   ["Name", "State", "Size", "%", "ETA", "Down", "Up", "Ratio"];
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 enum Mode {
   List,
   Help,
-  Details(u64),
+  Details(String),
 }
 
 pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
@@ -44,13 +44,18 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
     if Instant::now() >= next_refresh {
       match fetch(rpc) {
         Ok(new) => {
+          keep_selected_torrent(
+            &mut selection,
+            &snapshot.torrents,
+            &new.torrents,
+          );
           snapshot = new;
           error = None;
         }
         Err(e) => error = Some(e.to_string()),
       }
-      if let Mode::Details(id) = mode {
-        match fetch_details(rpc, id) {
+      if let Mode::Details(hash) = &mode {
+        match fetch_details(rpc, hash) {
           Ok(Some(new)) => details = Some(new),
           Ok(None) => mode = Mode::List,
           Err(e) => error = Some(e.to_string()),
@@ -88,7 +93,7 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
       frame.render_stateful_widget(table, table_area, &mut selection);
       frame.render_widget(footer, footer_area);
 
-      match (mode, &details) {
+      match (&mode, &details) {
         (Mode::Help, _) => {
           let help = help_text(&snapshot);
           let popup = frame.area().centered(
@@ -140,10 +145,10 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
           if let Some(torrent) =
             selection.selected().and_then(|i| snapshot.torrents.get(i))
           {
-            match fetch_details(rpc, torrent.id) {
+            match fetch_details(rpc, &torrent.hash_string) {
               Ok(Some(new)) => {
                 details = Some(new);
-                mode = Mode::Details(torrent.id);
+                mode = Mode::Details(torrent.hash_string.clone());
               }
               Ok(None) => {}
               Err(e) => error = Some(e.to_string()),
@@ -153,6 +158,22 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
         _ => {}
       }
     }
+  }
+}
+
+fn keep_selected_torrent(
+  selection: &mut TableState,
+  old: &[Torrent],
+  new: &[Torrent],
+) {
+  let selected = selection.selected().and_then(|index| old.get(index));
+  // If the torrent is gone, the selection keeps its row number.
+  if let Some(index) = selected.and_then(|selected| {
+    new
+      .iter()
+      .position(|torrent| torrent.hash_string == selected.hash_string)
+  }) {
+    selection.select(Some(index));
   }
 }
 

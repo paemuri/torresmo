@@ -19,7 +19,7 @@ pub struct Snapshot {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Torrent {
-  pub id: u64,
+  pub hash_string: String,
   pub name: String,
   pub status: TorrentStatus,
   pub size_when_done: u64,
@@ -127,7 +127,7 @@ pub fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
   let all_time = &stats["cumulative-stats"];
 
   let fields = [
-    "id",
+    "hashString",
     "name",
     "status",
     "sizeWhenDone",
@@ -154,7 +154,7 @@ pub fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
 
 pub fn fetch_details(
   rpc: &mut Rpc,
-  id: u64,
+  hash: &str,
 ) -> Result<Option<TorrentDetails>, Box<dyn Error>> {
   let fields = [
     "name",
@@ -195,7 +195,7 @@ pub fn fetch_details(
   ];
   let mut reply = rpc.call(
     "torrent-get",
-    json!({ "ids": [id], "fields": fields.as_slice() }),
+    json!({ "ids": [hash], "fields": fields.as_slice() }),
   )?;
   let torrents: Vec<TorrentDetails> =
     serde_json::from_value(reply["torrents"].take())?;
