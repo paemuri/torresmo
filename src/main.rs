@@ -64,6 +64,7 @@ struct Torrent {
   rate_download: u64,
   rate_upload: u64,
   upload_ratio: f64,
+  error: u64,
 }
 
 fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
@@ -92,6 +93,7 @@ fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
     "rateDownload",
     "rateUpload",
     "uploadRatio",
+    "error",
   ];
   let mut reply = rpc.call("torrent-get", json!({ "fields": fields }))?;
   let torrents = serde_json::from_value(reply["torrents"].take())?;
@@ -133,9 +135,10 @@ fn show(
         row[0] = truncate(&row[0], name_area.width.into());
       }
 
-      let rows = cells
-        .iter()
-        .map(|row| table_row(row.each_ref().map(String::as_str)));
+      let rows = cells.iter().zip(&snapshot.torrents).map(|(row, torrent)| {
+        table_row(row.each_ref().map(String::as_str))
+          .style(error_style(torrent.error))
+      });
       let table = Table::new(rows, widths)
         .header(header_row.clone())
         .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
@@ -240,6 +243,15 @@ fn column_widths(cells: &[[String; 8]]) -> [Constraint; 8] {
   let mut constraints = widths.map(|width| Constraint::Length(width as u16));
   constraints[0] = Constraint::Fill(1);
   constraints
+}
+
+fn error_style(error: u64) -> Style {
+  // Transmission: 1 and 2 are tracker warnings/errors, 3 is a local error.
+  match error {
+    1 | 2 => Style::new().yellow(),
+    3 => Style::new().red(),
+    _ => Style::new(),
+  }
 }
 
 fn truncate(text: &str, width: usize) -> String {
