@@ -14,6 +14,7 @@ use ratatui::widgets::{
 use reqwest::StatusCode;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::HeaderValue;
+use serde::Deserialize;
 use serde_json::{Value, json};
 
 const URL: &str = "http://localhost:9091/transmission/rpc";
@@ -38,9 +39,28 @@ fn run() -> Result<(), Box<dyn Error>> {
 }
 
 struct Snapshot {
-  footer: String,
-  help: String,
-  rows: Vec<[String; 9]>,
+  version: String,
+  download_dir: String,
+  speed_down: u64,
+  speed_up: u64,
+  total_down: u64,
+  total_up: u64,
+  torrents: Vec<Torrent>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Torrent {
+  #[expect(dead_code, reason = "torrent actions will target torrents by id")]
+  id: u64,
+  name: String,
+  status: u64,
+  size_when_done: u64,
+  percent_done: f64,
+  eta: i64,
+  rate_download: u64,
+  rate_upload: u64,
+  upload_ratio: f64,
 }
 
 fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
@@ -52,31 +72,12 @@ fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
   let version = session["version"]
     .as_str()
     .and_then(|version| version.split_whitespace().next())
-    .unwrap_or("unknown");
-  let download_dir = session["download-dir"].as_str().unwrap_or("?");
+    .unwrap_or("unknown")
+    .to_owned();
+  let download_dir = session["download-dir"].as_str().unwrap_or("?").to_owned();
 
   let stats = rpc.call("session-stats", json!({}))?;
-  let speed_down = stats["downloadSpeed"].as_u64().unwrap_or(0);
-  let speed_up = stats["uploadSpeed"].as_u64().unwrap_or(0);
   let all_time = &stats["cumulative-stats"];
-  let total_down = all_time["downloadedBytes"].as_u64().unwrap_or(0);
-  let total_up = all_time["uploadedBytes"].as_u64().unwrap_or(0);
-  let footer = format!(
-    "press h for help | ↓ {}/s ↑ {}/s | ↓ {} ↑ {} total",
-    format_bytes(speed_down),
-    format_bytes(speed_up),
-    format_bytes(total_down),
-    format_bytes(total_up),
-  );
-  let help = format!(
-    "↑ ↓  Move the selection\n\
-     h    Show help/info\n\
-     q    Quit\n\n\
-     Download folder  {download_dir}\n\
-     Transmission     {version}\n\
-     Torresmo         {}",
-    env!("CARGO_PKG_VERSION"),
-  );
 
   let fields = [
     "id",
@@ -89,36 +90,18 @@ fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
     "rateUpload",
     "uploadRatio",
   ];
-  let reply = rpc.call("torrent-get", json!({ "fields": fields }))?;
-  let torrents = reply["torrents"]
-    .as_array()
-    .ok_or("torrent-get reply without a torrent list")?;
+  let mut reply = rpc.call("torrent-get", json!({ "fields": fields }))?;
+  let torrents = serde_json::from_value(reply["torrents"].take())?;
 
-  let mut rows = Vec::new();
-  for torrent in torrents {
-    let id = torrent["id"].as_u64().unwrap_or(0);
-    let name = torrent["name"].as_str().unwrap_or("?");
-    let done = torrent["percentDone"].as_f64().unwrap_or(0.0) * 100.0;
-    let status = status_label(torrent["status"].as_u64());
-    let size = torrent["sizeWhenDone"].as_u64().unwrap_or(0);
-    let down = torrent["rateDownload"].as_u64().unwrap_or(0);
-    let up = torrent["rateUpload"].as_u64().unwrap_or(0);
-    let eta = torrent["eta"].as_i64().unwrap_or(-1);
-    let ratio = torrent["uploadRatio"].as_f64().unwrap_or(-1.0);
-    rows.push([
-      id.to_string(),
-      name.to_owned(),
-      status.to_owned(),
-      format_bytes(size),
-      format!("{done:.1}%"),
-      format_eta(eta),
-      format_speed(down),
-      format_speed(up),
-      format_ratio(ratio),
-    ]);
-  }
-
-  Ok(Snapshot { footer, help, rows })
+  Ok(Snapshot {
+    version,
+    download_dir,
+    speed_down: stats["downloadSpeed"].as_u64().unwrap_or(0),
+    speed_up: stats["uploadSpeed"].as_u64().unwrap_or(0),
+    total_down: all_time["downloadedBytes"].as_u64().unwrap_or(0),
+    total_up: all_time["uploadedBytes"].as_u64().unwrap_or(0),
+    torrents,
+  })
 }
 
 fn show(
@@ -127,7 +110,6 @@ fn show(
   mut snapshot: Snapshot,
 ) -> io::Result<()> {
   let widths = [
-    Constraint::Length(4),
     Constraint::Fill(1),
     Constraint::Length(15),
     Constraint::Length(8),
@@ -138,7 +120,7 @@ fn show(
     Constraint::Length(6),
   ];
   let header_row = table_row([
-    "#", "Name", "State", "Size", "Progress", "ETA", "Down", "Up", "Ratio",
+    "Name", "State", "Size", "Progress", "ETA", "Down", "Up", "Ratio",
   ])
   .bold();
   let mut selection = TableState::default().with_selected(Some(0));
@@ -149,15 +131,15 @@ fn show(
   loop {
     terminal.draw(|frame| {
       let rows = snapshot
-        .rows
+        .torrents
         .iter()
-        .map(|row| table_row(row.each_ref().map(String::as_str)));
+        .map(|torrent| table_row(torrent_cells(torrent)));
       let table = Table::new(rows, widths)
         .header(header_row.clone())
         .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
       let footer = match &error {
         Some(error) => Line::from(format!("Error: {error}")).red(),
-        None => Line::from(snapshot.footer.as_str()),
+        None => Line::from(footer_text(&snapshot)),
       };
 
       let [table_area, footer_area] =
@@ -167,7 +149,7 @@ fn show(
       frame.render_widget(footer, footer_area);
 
       if show_help {
-        let help = Text::from(snapshot.help.as_str());
+        let help = Text::from(help_text(&snapshot));
         let popup = frame.area().centered(
           Constraint::Length(help.width() as u16 + 4),
           Constraint::Length(help.height() as u16 + 2),
@@ -212,19 +194,56 @@ fn show(
   }
 }
 
-fn table_row(cells: [&str; 9]) -> Row<'_> {
-  let [id, name, status, size, progress, eta, down, up, ratio] = cells;
-  // Every column except State and Name holds a number, so it's right-aligned.
+fn footer_text(snapshot: &Snapshot) -> String {
+  format!(
+    "press h for help | ↓ {}/s ↑ {}/s | ↓ {} ↑ {} total",
+    format_bytes(snapshot.speed_down),
+    format_bytes(snapshot.speed_up),
+    format_bytes(snapshot.total_down),
+    format_bytes(snapshot.total_up),
+  )
+}
+
+fn help_text(snapshot: &Snapshot) -> String {
+  format!(
+    "↑ ↓  Move the selection\n\
+     h    Show help/info\n\
+     q    Quit\n\n\
+     Download folder  {}\n\
+     Transmission     {}\n\
+     Torresmo         {}",
+    snapshot.download_dir,
+    snapshot.version,
+    env!("CARGO_PKG_VERSION"),
+  )
+}
+
+fn torrent_cells(torrent: &Torrent) -> [String; 8] {
+  [
+    torrent.name.clone(),
+    status_label(torrent.status).to_owned(),
+    format_bytes(torrent.size_when_done),
+    format!("{:.1}%", torrent.percent_done * 100.0),
+    format_eta(torrent.eta),
+    format_speed(torrent.rate_download),
+    format_speed(torrent.rate_upload),
+    format_ratio(torrent.upload_ratio),
+  ]
+}
+
+fn table_row<'a, T: Into<Line<'a>>>(cells: [T; 8]) -> Row<'a> {
+  let [name, status, size, progress, eta, down, up, ratio] =
+    cells.map(Into::<Line>::into);
+  // Every column except Name and State holds a number, so it's right-aligned.
   Row::new([
-    Line::from(id).right_aligned(),
-    Line::from(name),
-    Line::from(status),
-    Line::from(size).right_aligned(),
-    Line::from(progress).right_aligned(),
-    Line::from(eta).right_aligned(),
-    Line::from(down).right_aligned(),
-    Line::from(up).right_aligned(),
-    Line::from(ratio).right_aligned(),
+    name,
+    status,
+    size.right_aligned(),
+    progress.right_aligned(),
+    eta.right_aligned(),
+    down.right_aligned(),
+    up.right_aligned(),
+    ratio.right_aligned(),
   ])
 }
 
@@ -274,15 +293,15 @@ fn format_ratio(ratio: f64) -> String {
   }
 }
 
-fn status_label(status: Option<u64>) -> &'static str {
+fn status_label(status: u64) -> &'static str {
   match status {
-    Some(0) => "Stopped",
-    Some(1) => "Verify queued",
-    Some(2) => "Verifying",
-    Some(3) => "Download queued",
-    Some(4) => "Downloading",
-    Some(5) => "Seed queued",
-    Some(6) => "Seeding",
+    0 => "Stopped",
+    1 => "Verify queued",
+    2 => "Verifying",
+    3 => "Download queued",
+    4 => "Downloading",
+    5 => "Seed queued",
+    6 => "Seeding",
     _ => "Unknown",
   }
 }
