@@ -26,8 +26,9 @@ pub fn format_speed(bytes_per_second: u64) -> String {
   format!("{}/s", format_bytes(bytes_per_second))
 }
 
-pub fn format_eta(seconds: i64) -> String {
-  // Transmission sends -1 (not available) and -2 (unknown) for the ETA.
+pub fn format_duration(seconds: i64) -> String {
+  // Negative means unknown: Transmission sends -1 (not available) and -2
+  // (unknown) for an ETA it can't compute.
   if seconds < 0 {
     return "-".to_owned();
   }

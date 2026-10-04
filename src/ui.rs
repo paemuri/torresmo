@@ -8,7 +8,8 @@ use ratatui::widgets::{Block, Clear, Padding, Paragraph, Row, Table, Wrap};
 
 use crate::app::{App, Mode};
 use crate::format::{
-  format_bytes, format_eta, format_ratio, format_speed, status_label, truncate,
+  format_bytes, format_duration, format_ratio, format_speed, status_label,
+  truncate,
 };
 use crate::transmission::{Snapshot, Torrent, TorrentDetails};
 
@@ -164,7 +165,7 @@ fn details_text(details: &TorrentDetails) -> Text<'static> {
       date
         .to_zoned(time_zone.clone())
         .strftime("%Y-%m-%d %H:%M:%S"),
-      format_eta(now - timestamp),
+      format_duration(now - timestamp),
     ),
     _ => "-".to_owned(),
   };
@@ -219,7 +220,7 @@ fn details_text(details: &TorrentDetails) -> Text<'static> {
       format!("{:.0}%", (details.percent_done * 100.0).floor()),
       width,
     ),
-    field("ETA", format_eta(details.eta), width),
+    field("ETA", format_duration(details.eta), width),
     field(
       "Speed",
       format!(
@@ -278,10 +279,10 @@ fn details_text(details: &TorrentDetails) -> Text<'static> {
     field("Last active", date(details.activity_date), width),
     field(
       "Downloading",
-      format_eta(details.seconds_downloading),
+      format_duration(details.seconds_downloading),
       width,
     ),
-    field("Seeding", format_eta(details.seconds_seeding), width),
+    field("Seeding", format_duration(details.seconds_seeding), width),
     Line::default(),
     Line::from("Trackers").bold(),
   ]);
@@ -321,7 +322,7 @@ fn torrent_cells(torrent: &Torrent) -> [String; COLUMNS] {
     status_label(torrent.status).to_owned(),
     format_bytes(torrent.size_when_done),
     format!("{:.0}", (torrent.percent_done * 100.0).floor()),
-    format_eta(torrent.eta),
+    format_duration(torrent.eta),
     format_speed(torrent.rate_download),
     format_speed(torrent.rate_upload),
     format_ratio(torrent.upload_ratio),
