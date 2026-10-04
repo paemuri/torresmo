@@ -31,12 +31,16 @@ fn main() -> ExitCode {
 fn run() -> Result<(), Box<dyn Error>> {
   let mut rpc = Rpc::new()?;
 
-  let session = rpc.call("session-get", json!({ "fields": ["version"] }))?;
+  let session = rpc.call(
+    "session-get",
+    json!({ "fields": ["version", "download-dir"] }),
+  )?;
   // The version looks like "1.2.3 (hash)"; the build hash is noise.
   let version = session["version"]
     .as_str()
     .and_then(|version| version.split_whitespace().next())
     .unwrap_or("unknown");
+  let download_dir = session["download-dir"].as_str().unwrap_or("?");
 
   let stats = rpc.call("session-stats", json!({}))?;
   let speed_down = stats["downloadSpeed"].as_u64().unwrap_or(0);
@@ -45,7 +49,7 @@ fn run() -> Result<(), Box<dyn Error>> {
   let total_down = all_time["downloadedBytes"].as_u64().unwrap_or(0);
   let total_up = all_time["uploadedBytes"].as_u64().unwrap_or(0);
   let footer = format!(
-    "↓ {}/s ↑ {}/s | all time ↓ {} ↑ {} | Transmission {version}",
+    "↓ {}/s ↑ {}/s | ↓ {} ↑ {} total | {download_dir} | v{version}",
     format_bytes(speed_down),
     format_bytes(speed_up),
     format_bytes(total_down),
