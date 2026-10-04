@@ -4,7 +4,22 @@
 
 ## About
 
-Simple and minimal TUI client for Transmission daemon/service.
+Dead simple and minimal TUI client for Transmission daemon/service.
+
+## Ignored features
+
+### Table sorting
+
+The table is always ordered by queue position, the `#` column. You can also move
+torrents in the queue, which immediately shows in the table's order. Adding
+sorting on top of that would add unnecessary complexity, and I don't want that.
+If you'd like to have sorting anyway, contact me.
+
+### Remote Transmission
+
+To run Torresmo, it's required to have the Transmission daemon running at
+`localhost:9091`, without authentication. The reason is simple: no use case. If
+you want it, let me know.
 
 ## License
 
