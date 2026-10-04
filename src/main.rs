@@ -1,7 +1,11 @@
 use std::error::Error;
+use std::io;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use ratatui::DefaultTerminal;
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::widgets::Paragraph;
 use reqwest::StatusCode;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::HeaderValue;
@@ -25,7 +29,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
   let session = rpc.call("session-get", json!({ "fields": ["version"] }))?;
   let version = session["version"].as_str().unwrap_or("unknown");
-  println!("Transmission is up (version {version})");
+  let mut lines = vec![format!("Transmission is up (version {version})")];
 
   let reply = rpc.call(
     "torrent-get",
@@ -36,17 +40,35 @@ fn run() -> Result<(), Box<dyn Error>> {
     .ok_or("torrent-get reply without a torrent list")?;
 
   if torrents.is_empty() {
-    println!("No torrents");
+    lines.push("No torrents".to_owned());
   }
   for torrent in torrents {
     let id = torrent["id"].as_u64().unwrap_or(0);
     let name = torrent["name"].as_str().unwrap_or("?");
     let done = torrent["percentDone"].as_f64().unwrap_or(0.0) * 100.0;
     let status = status_label(torrent["status"].as_u64());
-    println!("{id:>4} {status:<15} {done:>5.1}% {name}");
+    lines.push(format!("{id:>4} {status:<15} {done:>5.1}% {name}"));
   }
 
+  let text = lines.join("\n");
+  ratatui::run(|terminal| show(terminal, &text))?;
+
   Ok(())
+}
+
+fn show(terminal: &mut DefaultTerminal, text: &str) -> io::Result<()> {
+  loop {
+    terminal.draw(|frame| {
+      frame.render_widget(Paragraph::new(text), frame.area());
+    })?;
+
+    if let Event::Key(key) = event::read()?
+      && key.kind == KeyEventKind::Press
+      && key.code == KeyCode::Char('q')
+    {
+      return Ok(());
+    }
+  }
 }
 
 fn status_label(status: Option<u64>) -> &'static str {
