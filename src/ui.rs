@@ -3,7 +3,9 @@ use std::time::{Duration, Instant};
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{
+  self, Event, KeyCode, KeyEventKind, KeyModifiers,
+};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
@@ -22,8 +24,11 @@ use crate::transmission::{
 };
 
 const REFRESH: Duration = Duration::from_secs(1);
-const HEADERS: [&str; 8] =
-  ["Name", "State", "Size", "%", "ETA", "Down", "Up", "Ratio"];
+const COLUMNS: usize = 9;
+const NAME_COLUMN: usize = 1;
+const HEADERS: [&str; COLUMNS] = [
+  "#", "Name", "State", "Size", "%", "ETA", "Down", "Up", "Ratio",
+];
 
 #[derive(Clone, PartialEq)]
 enum Mode {
@@ -73,13 +78,14 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
           .areas(frame.area());
 
-      let mut cells: Vec<[String; 8]> =
+      let mut cells: Vec<[String; COLUMNS]> =
         snapshot.torrents.iter().map(torrent_cells).collect();
       let widths = column_widths(&cells);
-      let [name_area, ..] =
-        Layout::horizontal(widths).spacing(1).areas::<8>(table_area);
+      let [_, name_area, ..] = Layout::horizontal(widths)
+        .spacing(1)
+        .areas::<COLUMNS>(table_area);
       for row in &mut cells {
-        row[0] = truncate(&row[0], name_area.width.into());
+        row[NAME_COLUMN] = truncate(&row[NAME_COLUMN], name_area.width.into());
       }
 
       let rows = cells.iter().zip(&snapshot.torrents).map(|(row, torrent)| {
@@ -141,6 +147,7 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
         .selected()
         .and_then(|index| snapshot.torrents.get(index));
       let mut action = None;
+      let shift = key.modifiers.contains(KeyModifiers::SHIFT);
       match (&mode, key.code) {
         (Mode::DeleteAskData(hash), KeyCode::Char(answer @ ('y' | 'n'))) => {
           mode = Mode::DeleteConfirm {
@@ -165,6 +172,10 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
         (_, KeyCode::Char('h') | KeyCode::F(1)) => mode = Mode::Help,
         (_, KeyCode::Esc) => mode = Mode::List,
         (Mode::Help | Mode::Details(_), _) => {}
+        (_, KeyCode::Up) if shift => action = Some("queue-move-up"),
+        (_, KeyCode::Down) if shift => action = Some("queue-move-down"),
+        (_, KeyCode::Char('K')) => action = Some("queue-move-up"),
+        (_, KeyCode::Char('J')) => action = Some("queue-move-down"),
         (_, KeyCode::Up | KeyCode::Char('k')) => selection.select_previous(),
         (_, KeyCode::Down | KeyCode::Char('j')) => selection.select_next(),
         (_, KeyCode::Enter | KeyCode::Char('i')) => {
@@ -259,15 +270,16 @@ fn footer_text(snapshot: &Snapshot) -> String {
 
 fn help_text(snapshot: &Snapshot) -> Text<'static> {
   Text::from(vec![
-    field("↑ ↓ / k j", "Move the selection".into(), 16),
-    field("i / Enter", "Show the torrent details".into(), 16),
-    field("s", "Toggle pause (start/stop)".into(), 16),
-    field("S", "Start now, skipping the queue".into(), 16),
-    field("v", "Verify the downloaded data".into(), 16),
-    field("d / Del / Bksp", "Delete the torrent".into(), 16),
-    field("Esc", "Close the popup".into(), 16),
-    field("h / F1", "Show help".into(), 16),
-    field("q", "Quit".into(), 16),
+    field("↑ ↓ / k j", "Move the selection".into(), 17),
+    field("Shift+↑ ↓ / K J", "Move in the queue".into(), 17),
+    field("i / Enter", "Show the torrent details".into(), 17),
+    field("s", "Toggle pause (start/stop)".into(), 17),
+    field("S", "Start now, skipping the queue".into(), 17),
+    field("v", "Verify the downloaded data".into(), 17),
+    field("d / Del / Bksp", "Delete the torrent".into(), 17),
+    field("Esc", "Close the popup".into(), 17),
+    field("h / F1", "Show help".into(), 17),
+    field("q", "Quit".into(), 17),
     Line::default(),
     field("Location", snapshot.download_dir.clone(), 13),
     field("Transmission", snapshot.version.clone(), 13),
@@ -438,8 +450,9 @@ fn field(label: &str, value: String, width: usize) -> Line<'static> {
   ])
 }
 
-fn torrent_cells(torrent: &Torrent) -> [String; 8] {
+fn torrent_cells(torrent: &Torrent) -> [String; COLUMNS] {
   [
+    (torrent.queue_position + 1).to_string(),
     torrent.name.clone(),
     status_label(torrent.status).to_owned(),
     format_bytes(torrent.size_when_done),
@@ -451,7 +464,7 @@ fn torrent_cells(torrent: &Torrent) -> [String; 8] {
   ]
 }
 
-fn column_widths(cells: &[[String; 8]]) -> [Constraint; 8] {
+fn column_widths(cells: &[[String; COLUMNS]]) -> [Constraint; COLUMNS] {
   let mut widths = HEADERS.map(|header| Line::from(header).width());
   for row in cells {
     for (width, cell) in widths.iter_mut().zip(row) {
@@ -459,7 +472,7 @@ fn column_widths(cells: &[[String; 8]]) -> [Constraint; 8] {
     }
   }
   let mut constraints = widths.map(|width| Constraint::Length(width as u16));
-  constraints[0] = Constraint::Fill(1);
+  constraints[NAME_COLUMN] = Constraint::Fill(1);
   constraints
 }
 
@@ -472,11 +485,12 @@ fn error_style(error: u64) -> Style {
   }
 }
 
-fn table_row<'a, T: Into<Line<'a>>>(cells: [T; 8]) -> Row<'a> {
-  let [name, status, size, progress, eta, down, up, ratio] =
+fn table_row<'a, T: Into<Line<'a>>>(cells: [T; COLUMNS]) -> Row<'a> {
+  let [queue, name, status, size, progress, eta, down, up, ratio] =
     cells.map(Into::<Line>::into);
   // Every column except Name and State holds a number, so it's right-aligned.
   Row::new([
+    queue.right_aligned(),
     name,
     status,
     size.right_aligned(),

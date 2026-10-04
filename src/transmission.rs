@@ -29,6 +29,7 @@ pub struct Torrent {
   pub rate_upload: u64,
   pub upload_ratio: f64,
   pub error: u64,
+  pub queue_position: i64,
 }
 
 #[derive(Deserialize)]
@@ -137,9 +138,12 @@ pub fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
     "rateUpload",
     "uploadRatio",
     "error",
+    "queuePosition",
   ];
   let mut reply = rpc.call("torrent-get", json!({ "fields": fields }))?;
-  let torrents = serde_json::from_value(reply["torrents"].take())?;
+  let mut torrents: Vec<Torrent> =
+    serde_json::from_value(reply["torrents"].take())?;
+  torrents.sort_by_key(|torrent| torrent.queue_position);
 
   Ok(Snapshot {
     version,
