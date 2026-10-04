@@ -37,12 +37,12 @@ fn run() -> Result<(), Box<dyn Error>> {
   let fields = [
     "id",
     "name",
-    "percentDone",
     "status",
     "sizeWhenDone",
+    "percentDone",
+    "eta",
     "rateDownload",
     "rateUpload",
-    "eta",
     "uploadRatio",
   ];
   let reply = rpc.call("torrent-get", json!({ "fields": fields }))?;
@@ -63,14 +63,14 @@ fn run() -> Result<(), Box<dyn Error>> {
     let ratio = torrent["uploadRatio"].as_f64().unwrap_or(-1.0);
     rows.push([
       id.to_string(),
+      name.to_owned(),
       status.to_owned(),
-      format!("{done:.1}%"),
       format_bytes(size),
+      format!("{done:.1}%"),
+      format_eta(eta),
       format_speed(down),
       format_speed(up),
-      format_eta(eta),
       format_ratio(ratio),
-      name.to_owned(),
     ]);
   }
 
@@ -86,17 +86,17 @@ fn show(
 ) -> io::Result<()> {
   let widths = [
     Constraint::Length(4),
+    Constraint::Fill(1),
     Constraint::Length(15),
     Constraint::Length(8),
     Constraint::Length(8),
-    Constraint::Length(10),
-    Constraint::Length(10),
     Constraint::Length(7),
+    Constraint::Length(10),
+    Constraint::Length(10),
     Constraint::Length(6),
-    Constraint::Fill(1),
   ];
   let header_row = table_row([
-    "#", "State", "Progress", "Size", "Down", "Up", "ETA", "Ratio", "Name",
+    "#", "Name", "State", "Size", "Progress", "ETA", "Down", "Up", "Ratio",
   ]);
   let table = Table::new(
     rows
@@ -131,18 +131,18 @@ fn show(
 }
 
 fn table_row(cells: [&str; 9]) -> Row<'_> {
-  let [id, status, progress, size, down, up, eta, ratio, name] = cells;
+  let [id, name, status, size, progress, eta, down, up, ratio] = cells;
   // Every column except State and Name holds a number, so it's right-aligned.
   Row::new([
     Line::from(id).right_aligned(),
+    Line::from(name),
     Line::from(status),
-    Line::from(progress).right_aligned(),
     Line::from(size).right_aligned(),
+    Line::from(progress).right_aligned(),
+    Line::from(eta).right_aligned(),
     Line::from(down).right_aligned(),
     Line::from(up).right_aligned(),
-    Line::from(eta).right_aligned(),
     Line::from(ratio).right_aligned(),
-    Line::from(name),
   ])
 }
 
