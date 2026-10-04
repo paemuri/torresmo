@@ -28,7 +28,7 @@ pub fn read_line(
 ) -> Result<Option<String>, Box<dyn Error>> {
   let height = terminal.size()?.height;
   disable_raw_mode()?;
-  execute!(
+  let line = execute!(
     io::stdout(),
     MoveTo(0, height.saturating_sub(2)),
     ClearTerminal(ClearType::CurrentLine),
@@ -36,8 +36,10 @@ pub fn read_line(
     MoveTo(0, height.saturating_sub(1)),
     ClearTerminal(ClearType::CurrentLine),
     Show,
-  )?;
-  let line = edit_line(initial);
+  )
+  // Raw mode has to come back even if the prompt fails, or the TUI breaks.
+  .map_err(ReadlineError::from)
+  .and_then(|()| edit_line(initial));
   enable_raw_mode()?;
   terminal.clear()?;
   match line {
