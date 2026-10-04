@@ -21,6 +21,7 @@ pub struct Snapshot {
 pub struct Torrent {
   pub hash_string: String,
   pub name: String,
+  pub download_dir: String,
   pub status: TorrentStatus,
   pub size_when_done: u64,
   pub percent_done: f64,
@@ -139,6 +140,7 @@ pub fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
     "uploadRatio",
     "error",
     "queuePosition",
+    "downloadDir",
   ];
   let mut reply = rpc.call("torrent-get", json!({ "fields": fields }))?;
   let mut torrents: Vec<Torrent> =
@@ -170,6 +172,31 @@ pub fn add_torrent(rpc: &mut Rpc, source: &str) -> Result<(), Box<dyn Error>> {
   if let Some(name) = reply["torrent-duplicate"]["name"].as_str() {
     return Err(format!("Already added: {name}").into());
   }
+  Ok(())
+}
+
+pub fn move_torrent(
+  rpc: &mut Rpc,
+  hash: &str,
+  location: &str,
+) -> Result<(), Box<dyn Error>> {
+  rpc.call(
+    "torrent-set-location",
+    json!({ "ids": [hash], "location": location, "move": true }),
+  )?;
+  Ok(())
+}
+
+pub fn rename_torrent(
+  rpc: &mut Rpc,
+  hash: &str,
+  old_name: &str,
+  new_name: &str,
+) -> Result<(), Box<dyn Error>> {
+  rpc.call(
+    "torrent-rename-path",
+    json!({ "ids": [hash], "path": old_name, "name": new_name }),
+  )?;
   Ok(())
 }
 

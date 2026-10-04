@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::io;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use jiff::Timestamp;
@@ -33,7 +34,8 @@ use crate::format::{
 use crate::rpc::Rpc;
 use crate::transmission::{
   Snapshot, Torrent, TorrentDetails, TorrentStatus, add_torrent,
-  auto_sort_by_ratio, delete_torrent, fetch, fetch_details, torrent_action,
+  auto_sort_by_ratio, delete_torrent, fetch, fetch_details, move_torrent,
+  rename_torrent, torrent_action,
 };
 
 const REFRESH: Duration = Duration::from_secs(1);
@@ -210,7 +212,7 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
           }
         }
         (_, KeyCode::Char('a')) => {
-          match read_line(terminal, "Add torrent (magnet, URL or path)") {
+          match read_line(terminal, "Add torrent (magnet, URL or path)", "") {
             Ok(Some(source)) if !source.trim().is_empty() => {
               match add_torrent(rpc, &expand_home(source.trim())) {
                 Ok(()) => next_refresh = Instant::now(),
@@ -219,6 +221,40 @@ pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
             }
             Ok(_) => {}
             Err(e) => action_error = Some(e.to_string()),
+          }
+        }
+        (_, KeyCode::Char('m')) => {
+          if let Some(torrent) = selected {
+            match read_line(terminal, "Move data to", &torrent.download_dir) {
+              Ok(Some(location)) if !location.trim().is_empty() => {
+                let location = expand_home(location.trim());
+                if Path::new(&location) != Path::new(&torrent.download_dir) {
+                  match move_torrent(rpc, &torrent.hash_string, &location) {
+                    Ok(()) => next_refresh = Instant::now(),
+                    Err(e) => action_error = Some(e.to_string()),
+                  }
+                }
+              }
+              Ok(_) => {}
+              Err(e) => action_error = Some(e.to_string()),
+            }
+          }
+        }
+        (_, KeyCode::Char('r')) => {
+          if let Some(torrent) = selected {
+            match read_line(terminal, "Rename torrent", &torrent.name) {
+              Ok(Some(name))
+                if !name.trim().is_empty() && name != torrent.name =>
+              {
+                let hash = &torrent.hash_string;
+                match rename_torrent(rpc, hash, &torrent.name, name.trim()) {
+                  Ok(()) => next_refresh = Instant::now(),
+                  Err(e) => action_error = Some(e.to_string()),
+                }
+              }
+              Ok(_) => {}
+              Err(e) => action_error = Some(e.to_string()),
+            }
           }
         }
         (_, KeyCode::Char('d') | KeyCode::Delete | KeyCode::Backspace) => {
@@ -299,6 +335,7 @@ fn torrent_name(snapshot: &Snapshot, hash: &str) -> String {
 fn read_line(
   terminal: &mut DefaultTerminal,
   label: &str,
+  initial: &str,
 ) -> Result<Option<String>, Box<dyn Error>> {
   let height = terminal.size()?.height;
   disable_raw_mode()?;
@@ -311,7 +348,7 @@ fn read_line(
     ClearTerminal(ClearType::CurrentLine),
     Show,
   )?;
-  let line = edit_line();
+  let line = edit_line(initial);
   enable_raw_mode()?;
   terminal.clear()?;
   match line {
@@ -321,11 +358,11 @@ fn read_line(
   }
 }
 
-fn edit_line() -> rustyline::Result<String> {
+fn edit_line(initial: &str) -> rustyline::Result<String> {
   let mut editor = Editor::with_config(
     Config::builder()
       .completion_type(CompletionType::List)
-      .keyseq_timeout(Some(100))
+      .keyseq_timeout(Some(25))
       .build(),
   )?;
   editor.set_helper(Some(PathHelper {
@@ -335,7 +372,7 @@ fn edit_line() -> rustyline::Result<String> {
     KeyEvent(rustyline::KeyCode::Esc, Modifiers::NONE),
     Cmd::Interrupt,
   );
-  editor.readline(":")
+  editor.readline_with_initial(":", (initial, ""))
 }
 
 fn expand_home(path: &str) -> String {
@@ -364,6 +401,8 @@ fn help_text(snapshot: &Snapshot) -> Text<'static> {
     field("S", "Start now, skipping the queue".into(), 17),
     field("v", "Verify the downloaded data".into(), 17),
     field("a", "Add a torrent".into(), 17),
+    field("m", "Move the data".into(), 17),
+    field("r", "Rename the torrent".into(), 17),
     field("d / Del / Bksp", "Delete the torrent".into(), 17),
     field("Esc", "Close the popup".into(), 17),
     field("h / F1", "Show help".into(), 17),
