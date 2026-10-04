@@ -3,13 +3,15 @@ use std::io;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Style, Stylize};
-use ratatui::text::{Line, Text};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-  Block, Clear, Padding, Paragraph, Row, Table, TableState,
+  Block, Clear, Padding, Paragraph, Row, Table, TableState, Wrap,
 };
 use reqwest::StatusCode;
 use reqwest::blocking::{Client, Response};
@@ -54,7 +56,6 @@ struct Snapshot {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Torrent {
-  #[expect(dead_code, reason = "torrent actions will target torrents by id")]
   id: u64,
   name: String,
   status: u64,
@@ -65,6 +66,64 @@ struct Torrent {
   rate_upload: u64,
   upload_ratio: f64,
   error: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TorrentDetails {
+  name: String,
+  hash_string: String,
+  download_dir: String,
+  labels: Option<Vec<String>>,
+  is_private: bool,
+  creator: String,
+  comment: String,
+  status: u64,
+  error: u64,
+  error_string: String,
+  percent_done: f64,
+  eta: i64,
+  rate_download: u64,
+  rate_upload: u64,
+  peers_connected: u64,
+  peers_sending_to_us: u64,
+  peers_getting_from_us: u64,
+  queue_position: i64,
+  bandwidth_priority: i64,
+  total_size: u64,
+  size_when_done: u64,
+  left_until_done: u64,
+  downloaded_ever: u64,
+  uploaded_ever: u64,
+  corrupt_ever: u64,
+  upload_ratio: f64,
+  piece_count: u64,
+  piece_size: u64,
+  file_count: Option<u64>,
+  added_date: i64,
+  done_date: i64,
+  activity_date: i64,
+  seconds_downloading: i64,
+  seconds_seeding: i64,
+  tracker_stats: Vec<TrackerStats>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackerStats {
+  host: String,
+  seeder_count: i64,
+  leecher_count: i64,
+  has_announced: bool,
+  last_announce_succeeded: bool,
+  last_announce_result: String,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+  List,
+  Help,
+  Details(u64),
 }
 
 fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
@@ -109,6 +168,56 @@ fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
   })
 }
 
+fn fetch_details(
+  rpc: &mut Rpc,
+  id: u64,
+) -> Result<Option<TorrentDetails>, Box<dyn Error>> {
+  let fields = [
+    "name",
+    "hashString",
+    "downloadDir",
+    "labels",
+    "isPrivate",
+    "creator",
+    "comment",
+    "status",
+    "error",
+    "errorString",
+    "percentDone",
+    "eta",
+    "rateDownload",
+    "rateUpload",
+    "peersConnected",
+    "peersSendingToUs",
+    "peersGettingFromUs",
+    "queuePosition",
+    "bandwidthPriority",
+    "totalSize",
+    "sizeWhenDone",
+    "leftUntilDone",
+    "downloadedEver",
+    "uploadedEver",
+    "corruptEver",
+    "uploadRatio",
+    "pieceCount",
+    "pieceSize",
+    "fileCount",
+    "addedDate",
+    "doneDate",
+    "activityDate",
+    "secondsDownloading",
+    "secondsSeeding",
+    "trackerStats",
+  ];
+  let mut reply = rpc.call(
+    "torrent-get",
+    json!({ "ids": [id], "fields": fields.as_slice() }),
+  )?;
+  let torrents: Vec<TorrentDetails> =
+    serde_json::from_value(reply["torrents"].take())?;
+  Ok(torrents.into_iter().next())
+}
+
 fn show(
   terminal: &mut DefaultTerminal,
   rpc: &mut Rpc,
@@ -116,7 +225,8 @@ fn show(
 ) -> io::Result<()> {
   let header_row = table_row(HEADERS).bold();
   let mut selection = TableState::default().with_selected(Some(0));
-  let mut show_help = false;
+  let mut mode = Mode::List;
+  let mut details: Option<TorrentDetails> = None;
   let mut error: Option<String> = None;
   let mut next_refresh = Instant::now() + REFRESH;
 
@@ -150,19 +260,36 @@ fn show(
       frame.render_stateful_widget(table, table_area, &mut selection);
       frame.render_widget(footer, footer_area);
 
-      if show_help {
-        let help = Text::from(help_text(&snapshot));
-        let popup = frame.area().centered(
-          Constraint::Length(help.width() as u16 + 4),
-          Constraint::Length(help.height() as u16 + 2),
-        );
-        let help = Paragraph::new(help).block(
-          Block::bordered()
-            .title(" Help ")
-            .padding(Padding::horizontal(1)),
-        );
-        frame.render_widget(Clear, popup);
-        frame.render_widget(help, popup);
+      match (mode, &details) {
+        (Mode::Help, _) => {
+          let help = help_text(&snapshot);
+          let popup = frame.area().centered(
+            Constraint::Length(help.width() as u16 + 4),
+            Constraint::Length(help.height() as u16 + 2),
+          );
+          let help = Paragraph::new(help).block(
+            Block::bordered()
+              .title(" Help ")
+              .padding(Padding::horizontal(1)),
+          );
+          frame.render_widget(Clear, popup);
+          frame.render_widget(help, popup);
+        }
+        (Mode::Details(_), Some(details)) => {
+          let text = details_text(details);
+          let popup = frame.area().centered(
+            Constraint::Percentage(80),
+            Constraint::Max(text.height() as u16 + 2),
+          );
+          let text = Paragraph::new(text).wrap(Wrap { trim: false }).block(
+            Block::bordered()
+              .title(" Details ")
+              .padding(Padding::horizontal(1)),
+          );
+          frame.render_widget(Clear, popup);
+          frame.render_widget(text, popup);
+        }
+        _ => {}
       }
     })?;
 
@@ -172,13 +299,29 @@ fn show(
       && key.kind == KeyEventKind::Press
     {
       match key.code {
-        KeyCode::Char('h') => show_help = !show_help,
-        KeyCode::F(1) => show_help = true,
-        KeyCode::Esc => show_help = false,
         KeyCode::Char('q') => return Ok(()),
-        _ if show_help => {}
+        KeyCode::Char('h') | KeyCode::F(1) if mode == Mode::Help => {
+          mode = Mode::List
+        }
+        KeyCode::Char('h') | KeyCode::F(1) => mode = Mode::Help,
+        KeyCode::Esc => mode = Mode::List,
+        _ if mode != Mode::List => {}
         KeyCode::Up => selection.select_previous(),
         KeyCode::Down => selection.select_next(),
+        KeyCode::Enter => {
+          if let Some(torrent) =
+            selection.selected().and_then(|i| snapshot.torrents.get(i))
+          {
+            match fetch_details(rpc, torrent.id) {
+              Ok(Some(new)) => {
+                details = Some(new);
+                mode = Mode::Details(torrent.id);
+              }
+              Ok(None) => {}
+              Err(e) => error = Some(e.to_string()),
+            }
+          }
+        }
         _ => {}
       }
     }
@@ -190,6 +333,13 @@ fn show(
           error = None;
         }
         Err(e) => error = Some(e.to_string()),
+      }
+      if let Mode::Details(id) = mode {
+        match fetch_details(rpc, id) {
+          Ok(Some(new)) => details = Some(new),
+          Ok(None) => mode = Mode::List,
+          Err(e) => error = Some(e.to_string()),
+        }
       }
       next_refresh = Instant::now() + REFRESH;
     }
@@ -206,18 +356,183 @@ fn footer_text(snapshot: &Snapshot) -> String {
   )
 }
 
-fn help_text(snapshot: &Snapshot) -> String {
-  format!(
-    "↑ ↓  Move the selection\n\
-     h    Show help/info\n\
-     q    Quit\n\n\
-     Download folder  {}\n\
-     Transmission     {}\n\
-     Torresmo         {}",
-    snapshot.download_dir,
-    snapshot.version,
-    env!("CARGO_PKG_VERSION"),
-  )
+fn help_text(snapshot: &Snapshot) -> Text<'static> {
+  Text::from(vec![
+    field("↑ ↓", "Move the selection".into(), 7),
+    field("Enter", "Show the torrent details".into(), 7),
+    field("Esc", "Close the popup".into(), 7),
+    field("h", "Show help/info".into(), 7),
+    field("q", "Quit".into(), 7),
+    Line::default(),
+    field("Location", snapshot.download_dir.clone(), 13),
+    field("Transmission", snapshot.version.clone(), 13),
+    field("Torresmo", env!("CARGO_PKG_VERSION").into(), 13),
+  ])
+}
+
+fn details_text(details: &TorrentDetails) -> Text<'static> {
+  let now = Timestamp::now().as_second();
+  let time_zone = TimeZone::system();
+  let or_dash = |text: &str| match text {
+    "" => "-".to_owned(),
+    text => text.to_owned(),
+  };
+  let date = |timestamp: i64| match Timestamp::from_second(timestamp) {
+    Ok(date) if timestamp > 0 => format!(
+      "{}, {} ago",
+      date
+        .to_zoned(time_zone.clone())
+        .strftime("%Y-%m-%d %H:%M:%S"),
+      format_eta(now - timestamp),
+    ),
+    _ => "-".to_owned(),
+  };
+  let count = |count: i64| match count {
+    ..0 => "?".to_owned(),
+    count => count.to_string(),
+  };
+  let size = if details.size_when_done == details.total_size {
+    format_bytes(details.total_size)
+  } else {
+    format!(
+      "{} selected of {}",
+      format_bytes(details.size_when_done),
+      format_bytes(details.total_size),
+    )
+  };
+  let priority = match details.bandwidth_priority {
+    ..0 => "low",
+    0 => "normal",
+    _ => "high",
+  };
+
+  let width = 13;
+  let mut lines = vec![
+    field("Name", details.name.clone(), width),
+    field("Hash", details.hash_string.clone(), width),
+    field("Location", details.download_dir.clone(), width),
+    field(
+      "Labels",
+      or_dash(&details.labels.as_deref().unwrap_or_default().join(", ")),
+      width,
+    ),
+    field(
+      "Private",
+      if details.is_private { "yes" } else { "no" }.into(),
+      width,
+    ),
+    field("Creator", or_dash(&details.creator), width),
+    field("Comment", or_dash(&details.comment), width),
+    Line::default(),
+    field("State", status_label(details.status).to_owned(), width),
+  ];
+  if details.error != 0 {
+    lines.push(
+      field("Error", details.error_string.clone(), width)
+        .style(error_style(details.error)),
+    );
+  }
+  lines.extend([
+    field(
+      "Progress",
+      format!("{:.0}%", (details.percent_done * 100.0).floor()),
+      width,
+    ),
+    field("ETA", format_eta(details.eta), width),
+    field(
+      "Speed",
+      format!(
+        "↓ {}/s ↑ {}/s",
+        format_bytes(details.rate_download),
+        format_bytes(details.rate_upload),
+      ),
+      width,
+    ),
+    field(
+      "Peers",
+      format!(
+        "{} connected, {} sending to us, {} receiving from us",
+        details.peers_connected,
+        details.peers_sending_to_us,
+        details.peers_getting_from_us,
+      ),
+      width,
+    ),
+    field(
+      "Queue",
+      format!("position {}, {priority} priority", details.queue_position),
+      width,
+    ),
+    Line::default(),
+    field("Size", size, width),
+    field("Left", format_bytes(details.left_until_done), width),
+    field(
+      "Downloaded",
+      format!(
+        "{} ({} corrupt)",
+        format_bytes(details.downloaded_ever),
+        format_bytes(details.corrupt_ever),
+      ),
+      width,
+    ),
+    field("Uploaded", format_bytes(details.uploaded_ever), width),
+    field("Ratio", format_ratio(details.upload_ratio), width),
+    field(
+      "Pieces",
+      format!(
+        "{} × {}",
+        details.piece_count,
+        format_bytes(details.piece_size),
+      ),
+      width,
+    ),
+    field(
+      "Files",
+      details.file_count.map_or("?".into(), |n| n.to_string()),
+      width,
+    ),
+    Line::default(),
+    field("Added", date(details.added_date), width),
+    field("Completed", date(details.done_date), width),
+    field("Last active", date(details.activity_date), width),
+    field(
+      "Downloading",
+      format_eta(details.seconds_downloading),
+      width,
+    ),
+    field("Seeding", format_eta(details.seconds_seeding), width),
+    Line::default(),
+    Line::from("Trackers").bold(),
+  ]);
+  for tracker in &details.tracker_stats {
+    let result = if tracker.has_announced {
+      &tracker.last_announce_result
+    } else {
+      "not announced yet"
+    };
+    let line = field(
+      &tracker.host,
+      format!(
+        "{} seeders, {} leechers, {result}",
+        count(tracker.seeder_count),
+        count(tracker.leecher_count),
+      ),
+      width,
+    );
+    if tracker.has_announced && !tracker.last_announce_succeeded {
+      lines.push(line.yellow());
+    } else {
+      lines.push(line);
+    }
+  }
+  Text::from(lines)
+}
+
+fn field(label: &str, value: String, width: usize) -> Line<'static> {
+  Line::from(vec![
+    Span::from(format!("{label:<width$}")).bold(),
+    Span::from(value),
+  ])
 }
 
 fn torrent_cells(torrent: &Torrent) -> [String; 8] {
