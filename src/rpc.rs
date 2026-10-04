@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 const URL: &str = "http://localhost:9091/transmission/rpc";
 const SESSION_HEADER: &str = "X-Transmission-Session-Id";
+const TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct Rpc {
   client: Client,
@@ -16,7 +17,7 @@ pub struct Rpc {
 
 impl Rpc {
   pub fn new() -> Result<Self, Box<dyn Error>> {
-    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
+    let client = Client::builder().timeout(TIMEOUT).build()?;
     Ok(Self {
       client,
       session_id: None,
@@ -43,7 +44,13 @@ impl Rpc {
       response = self.send(&body)?;
     }
 
-    let mut reply: Value = response.error_for_status()?.json()?;
+    let status = response.status();
+    if !status.is_success() {
+      return Err(format!("Transmission answered {status}").into());
+    }
+    let mut reply: Value = response.json().map_err(|error| {
+      format!("Invalid reply from Transmission: {}", root_cause(&error))
+    })?;
 
     match reply["result"].as_str() {
       Some("success") => Ok(reply["arguments"].take()),
@@ -52,11 +59,27 @@ impl Rpc {
     }
   }
 
-  fn send(&self, body: &Value) -> reqwest::Result<Response> {
+  fn send(&self, body: &Value) -> Result<Response, String> {
     let mut request = self.client.post(URL).json(body);
     if let Some(session_id) = &self.session_id {
       request = request.header(SESSION_HEADER, session_id);
     }
-    request.send()
+    request.send().map_err(|error| {
+      if error.is_timeout() {
+        format!("Transmission didn't answer within {}s", TIMEOUT.as_secs())
+      } else if error.is_connect() {
+        format!("Can't connect to Transmission: {}", root_cause(&error))
+      } else {
+        root_cause(&error)
+      }
+    })
   }
+}
+
+fn root_cause(error: &dyn Error) -> String {
+  let mut cause = error;
+  while let Some(source) = cause.source() {
+    cause = source;
+  }
+  cause.to_string()
 }
