@@ -335,21 +335,19 @@ fn details_text(details: &TorrentDetails) -> Text<'static> {
     Line::default(),
     Line::from("Trackers").bold(),
   ]);
-  for tracker in &details.tracker_stats {
+  for (number, tracker) in details.tracker_stats.iter().enumerate() {
     let result = if tracker.has_announced {
       &tracker.last_announce_result
     } else {
       "not announced yet"
     };
-    let line = field(
-      &tracker.host,
-      format!(
-        "{} seeders, {} leechers, {result}",
-        count(tracker.seeder_count),
-        count(tracker.leecher_count),
-      ),
-      width,
-    );
+    let line = Line::from(format!(
+      "{}. {} ({} seeders, {} leechers, {result})",
+      number + 1,
+      tracker.host,
+      count(tracker.seeder_count),
+      count(tracker.leecher_count),
+    ));
     if tracker.has_announced && !tracker.last_announce_succeeded {
       lines.push(line.yellow());
     } else {
