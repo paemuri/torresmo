@@ -1,5 +1,7 @@
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::transmission::TorrentStatus;
+
 pub fn format_bytes(bytes: u64) -> String {
   // Decimal units (1 kB = 1000 B), the same as Transmission's own clients.
   const UNITS: [&str; 4] = ["kB", "MB", "GB", "TB"];
@@ -46,16 +48,16 @@ pub fn format_ratio(ratio: f64) -> String {
   }
 }
 
-pub fn status_label(status: u64) -> &'static str {
+pub fn status_label(status: TorrentStatus) -> &'static str {
   match status {
-    0 => "Stopped",
-    1 => "Queued", // Verify queued.
-    2 => "Verifying",
-    3 => "Queued", // Download queued.
-    4 => "Downloading",
-    5 => "Queued", // Seed queued.
-    6 => "Seeding",
-    _ => "Unknown",
+    TorrentStatus::Stopped => "Stopped",
+    TorrentStatus::VerifyQueued
+    | TorrentStatus::DownloadQueued
+    | TorrentStatus::SeedQueued => "Queued",
+    TorrentStatus::Verifying => "Verifying",
+    TorrentStatus::Downloading => "Downloading",
+    TorrentStatus::Seeding => "Seeding",
+    TorrentStatus::Unknown => "Unknown",
   }
 }
 

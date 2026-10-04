@@ -21,7 +21,7 @@ pub struct Snapshot {
 pub struct Torrent {
   pub id: u64,
   pub name: String,
-  pub status: u64,
+  pub status: TorrentStatus,
   pub size_when_done: u64,
   pub percent_done: f64,
   pub eta: i64,
@@ -41,7 +41,7 @@ pub struct TorrentDetails {
   pub is_private: bool,
   pub creator: String,
   pub comment: String,
-  pub status: u64,
+  pub status: TorrentStatus,
   pub error: u64,
   pub error_string: String,
   pub percent_done: f64,
@@ -80,6 +80,34 @@ pub struct TrackerStats {
   pub has_announced: bool,
   pub last_announce_succeeded: bool,
   pub last_announce_result: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Deserialize)]
+#[serde(from = "u64")]
+pub enum TorrentStatus {
+  Stopped,
+  VerifyQueued,
+  Verifying,
+  DownloadQueued,
+  Downloading,
+  SeedQueued,
+  Seeding,
+  Unknown,
+}
+
+impl From<u64> for TorrentStatus {
+  fn from(code: u64) -> Self {
+    match code {
+      0 => Self::Stopped,
+      1 => Self::VerifyQueued,
+      2 => Self::Verifying,
+      3 => Self::DownloadQueued,
+      4 => Self::Downloading,
+      5 => Self::SeedQueued,
+      6 => Self::Seeding,
+      _ => Self::Unknown,
+    }
+  }
 }
 
 pub fn fetch(rpc: &mut Rpc) -> Result<Snapshot, Box<dyn Error>> {
