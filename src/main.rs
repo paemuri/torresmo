@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::widgets::Paragraph;
+use ratatui::layout::{Constraint, Layout};
+use ratatui::style::{Color, Style};
+use ratatui::widgets::{List, ListState};
 use reqwest::StatusCode;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::HeaderValue;
@@ -29,7 +31,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 
   let session = rpc.call("session-get", json!({ "fields": ["version"] }))?;
   let version = session["version"].as_str().unwrap_or("unknown");
-  let mut lines = vec![format!("Transmission is up (version {version})")];
+  let header = format!("Transmission is up (version {version})");
 
   let reply = rpc.call(
     "torrent-get",
@@ -39,34 +41,47 @@ fn run() -> Result<(), Box<dyn Error>> {
     .as_array()
     .ok_or("torrent-get reply without a torrent list")?;
 
-  if torrents.is_empty() {
-    lines.push("No torrents".to_owned());
-  }
+  let mut rows = Vec::new();
   for torrent in torrents {
     let id = torrent["id"].as_u64().unwrap_or(0);
     let name = torrent["name"].as_str().unwrap_or("?");
     let done = torrent["percentDone"].as_f64().unwrap_or(0.0) * 100.0;
     let status = status_label(torrent["status"].as_u64());
-    lines.push(format!("{id:>4} {status:<15} {done:>5.1}% {name}"));
+    rows.push(format!("{id:>4} {status:<15} {done:>5.1}% {name}"));
   }
 
-  let text = lines.join("\n");
-  ratatui::run(|terminal| show(terminal, &text))?;
+  ratatui::run(|terminal| show(terminal, &header, &rows))?;
 
   Ok(())
 }
 
-fn show(terminal: &mut DefaultTerminal, text: &str) -> io::Result<()> {
+fn show(
+  terminal: &mut DefaultTerminal,
+  header: &str,
+  rows: &[String],
+) -> io::Result<()> {
+  let list = List::new(rows.iter().map(String::as_str))
+    .highlight_style(Style::new().bg(Color::White).fg(Color::Black));
+  let mut selection = ListState::default().with_selected(Some(0));
+
   loop {
     terminal.draw(|frame| {
-      frame.render_widget(Paragraph::new(text), frame.area());
+      let [header_area, list_area] =
+        Layout::vertical([Constraint::Length(1), Constraint::Fill(1)])
+          .areas(frame.area());
+      frame.render_widget(header, header_area);
+      frame.render_stateful_widget(&list, list_area, &mut selection);
     })?;
 
     if let Event::Key(key) = event::read()?
       && key.kind == KeyEventKind::Press
-      && key.code == KeyCode::Char('q')
     {
-      return Ok(());
+      match key.code {
+        KeyCode::Char('q') => return Ok(()),
+        KeyCode::Up => selection.select_previous(),
+        KeyCode::Down => selection.select_next(),
+        _ => {}
+      }
     }
   }
 }
