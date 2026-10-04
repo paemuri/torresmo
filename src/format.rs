@@ -10,7 +10,9 @@ pub fn format_bytes(bytes: u64) -> String {
   }
   let mut value = bytes as f64 / 1000.0;
   let mut unit = 0;
-  while value >= 1000.0 && unit < UNITS.len() - 1 {
+  // `{:.1}` rounds 999.95 up to "1000.0", so that already counts as the next
+  // unit.
+  while value >= 999.95 && unit < UNITS.len() - 1 {
     value /= 1000.0;
     unit += 1;
   }
