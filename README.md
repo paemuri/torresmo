@@ -6,6 +6,12 @@
 
 Dead simple and minimal TUI client for Transmission daemon/service.
 
+## Install
+
+```sh
+cargo install --git https://git.sr.ht/~paemuri/torresmo
+```
+
 ## Ignored features
 
 ### Table sorting
