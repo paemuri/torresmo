@@ -14,6 +14,7 @@ use crate::transmission::{Snapshot, Torrent, TorrentDetails};
 
 const COLUMNS: usize = 9;
 const NAME_COLUMN: usize = 1;
+const COLUMN_SPACING: u16 = 2;
 const HEADERS: [&str; COLUMNS] = [
   "#", "Name", "State", "Size", "%", "ETA", "Down", "Up", "Ratio",
 ];
@@ -28,7 +29,7 @@ impl App {
       self.snapshot.torrents.iter().map(torrent_cells).collect();
     let widths = column_widths(&cells);
     let [_, name_area, ..] = Layout::horizontal(widths)
-      .spacing(1)
+      .spacing(COLUMN_SPACING)
       .areas::<COLUMNS>(table_area);
     for row in &mut cells {
       row[NAME_COLUMN] = truncate(&row[NAME_COLUMN], name_area.width.into());
@@ -43,6 +44,7 @@ impl App {
             .style(error_style(torrent.error))
         });
     let table = Table::new(rows, widths)
+      .column_spacing(COLUMN_SPACING)
       .header(table_row(HEADERS).bold())
       .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
     let footer =
