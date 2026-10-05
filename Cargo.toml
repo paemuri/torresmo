@@ -6,6 +6,7 @@ rust-version = "1.88"
 description = "Dead simple and minimal TUI client for the Transmission daemon"
 license = "Unlicense"
 repository = "https://git.sr.ht/~paemuri/torresmo"
+homepage = "https://sr.ht/~paemuri/torresmo"
 readme = "README.md"
 keywords = ["transmission", "torrent", "tui", "bittorrent"]
 categories = ["command-line-utilities"]
