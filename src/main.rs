@@ -10,7 +10,36 @@ use std::process::ExitCode;
 
 use rpc::Rpc;
 
+const HELP: &str = "\
+Dead simple and minimal TUI client for the Transmission daemon.
+
+Usage: torresmo [OPTION]
+
+Options:
+  -h, --help     Print this help and exit
+  -v, --version  Print the version and exit
+
+Inside Torresmo, press h for the key bindings.";
+
 fn main() -> ExitCode {
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  let args: Vec<&str> = args.iter().map(String::as_str).collect();
+  match args.as_slice() {
+    [] => {}
+    ["-v" | "--version"] => {
+      println!("torresmo {}", env!("CARGO_PKG_VERSION"));
+      return ExitCode::SUCCESS;
+    }
+    ["-h" | "--help"] => {
+      println!("{HELP}");
+      return ExitCode::SUCCESS;
+    }
+    ["-v" | "--version" | "-h" | "--help", flag, ..] | [flag, ..] => {
+      eprintln!("unknown flag: {flag}\nRun `torresmo --help` for usage.");
+      return ExitCode::from(2);
+    }
+  }
+
   match run() {
     Ok(()) => ExitCode::SUCCESS,
     Err(e) => {
