@@ -1,6 +1,8 @@
 # Torresmo
 
 [![License][badge-1-img]][badge-1-link]
+[![crates.io][badge-2-img]][badge-2-link]
+[![AUR][badge-3-img]][badge-3-link]
 
 ## About
 
@@ -13,11 +15,36 @@ Torresmo is a deliberately tiny alternative to full-featured clients like
 It shows your torrents in queue order and lets you manage them, and nothing
 else.
 
-## Install
+## Installation
+
+AUR / Arch Linux:
+
+```sh
+$AUR_HELPER -S torresmo
+```
+
+Homebrew / macOS:
+
+```sh
+brew install paemuri/pkgs/torresmo
+```
+
+Cargo:
 
 ```sh
 cargo install torresmo
 ```
+
+## Usage
+
+Start the Transmission daemon (it must listen on `localhost:9091`, without
+authentication), then run:
+
+```sh
+torresmo
+```
+
+Press `h` inside Torresmo for the key bindings or `q` to exit.
 
 ## Ignored features
 
@@ -69,3 +96,7 @@ additional terms or conditions.
 
 [badge-1-img]: https://img.shields.io/badge/license-Unlicense-green?style=flat-square
 [badge-1-link]: ./LICENSE
+[badge-2-img]: https://img.shields.io/crates/v/torresmo?style=flat-square
+[badge-2-link]: https://crates.io/crates/torresmo
+[badge-3-img]: https://img.shields.io/aur/version/torresmo?style=flat-square
+[badge-3-link]: https://aur.archlinux.org/packages/torresmo
