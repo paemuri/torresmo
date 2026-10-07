@@ -29,6 +29,12 @@ Homebrew / macOS:
 brew install paemuri/pkgs/torresmo
 ```
 
+Nix:
+
+```sh
+nix profile install sourcehut:~paemuri/nix-pkgs#torresmo
+```
+
 Cargo:
 
 ```sh
