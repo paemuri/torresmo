@@ -132,6 +132,7 @@ impl App {
       }
       (_, KeyCode::Char('h') | KeyCode::F(1)) => self.mode = Mode::Help,
       (_, KeyCode::Esc) => self.mode = Mode::List,
+      (Mode::Details(_), KeyCode::Char('i')) => self.mode = Mode::List,
       (Mode::Help | Mode::Details(_), _) => {}
       (_, KeyCode::Up) if shift => action = Some("queue-move-up"),
       (_, KeyCode::Down) if shift => action = Some("queue-move-down"),
