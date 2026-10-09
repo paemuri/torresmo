@@ -28,14 +28,14 @@ pub fn read_line(
 ) -> Result<Option<String>, Box<dyn Error>> {
   let height = terminal.size()?.height;
   disable_raw_mode()?;
+  // Clear screen, show label in first line, prompt in the second line.
   let line = execute!(
     io::stdout(),
-    MoveTo(0, height.saturating_sub(2)),
-    ClearTerminal(ClearType::CurrentLine),
+    ClearTerminal(ClearType::All),
+    MoveTo(0, 0),
     Print(label),
-    MoveTo(0, height.saturating_sub(1)),
-    ClearTerminal(ClearType::CurrentLine),
-    Show,
+    MoveTo(0, 1),
+    Show
   )
   // Raw mode has to come back even if the prompt fails, or the TUI breaks.
   .map_err(ReadlineError::from)
@@ -63,7 +63,7 @@ fn edit_line(initial: &str) -> rustyline::Result<String> {
     KeyEvent(rustyline::KeyCode::Esc, Modifiers::NONE),
     Cmd::Interrupt,
   );
-  editor.readline_with_initial(":", (initial, ""))
+  editor.readline_with_initial("", (initial, ""))
 }
 
 pub fn expand_home(path: &str) -> String {
