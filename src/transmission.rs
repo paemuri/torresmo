@@ -16,7 +16,7 @@ pub struct Snapshot {
   pub torrents: Vec<Torrent>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Torrent {
   pub hash_string: String,
@@ -224,6 +224,7 @@ pub fn auto_sort_by_ratio(
 
   let mut by_ratio: Vec<&Torrent> = torrents.iter().collect();
   by_ratio.sort_by(|a, b| rank(a).total_cmp(&rank(b)));
+
   // Each move puts the torrent at #1, so the lowest ratio has to go last.
   for torrent in by_ratio.iter().rev() {
     rpc.call("queue-move-top", json!({ "ids": [torrent.hash_string] }))?;

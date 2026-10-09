@@ -1,5 +1,7 @@
+use std::error::Error;
 use std::io;
 use std::path::Path;
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use ratatui::DefaultTerminal;
@@ -15,8 +17,11 @@ use crate::transmission::{
   auto_sort_by_ratio, delete_torrent, fetch, fetch_details, move_torrent,
   rename_torrent, torrent_action,
 };
+use crate::worker::{self, Job, Reply};
 
 const REFRESH: Duration = Duration::from_secs(1);
+// How long to wait for a key before checking the worker's replies again.
+const POLL: Duration = Duration::from_millis(50);
 
 #[derive(Clone, PartialEq)]
 pub enum Mode {
@@ -27,20 +32,18 @@ pub enum Mode {
   DeleteConfirm { hash: String, delete_data: bool },
 }
 
-pub fn show(terminal: &mut DefaultTerminal, rpc: &mut Rpc) -> io::Result<()> {
-  let mut app = App::new();
+pub fn show(terminal: &mut DefaultTerminal, rpc: Rpc) -> io::Result<()> {
+  let mut app = App::new(rpc);
   while !app.exit {
-    if Instant::now() >= app.next_refresh {
-      app.refresh(rpc);
-    }
+    app.receive_replies()?;
+    app.refresh_if_due();
     terminal.draw(|frame| app.draw(frame))?;
 
-    let timeout = app.next_refresh.saturating_duration_since(Instant::now());
-    if event::poll(timeout)?
+    if event::poll(POLL)?
       && let Event::Key(key) = event::read()?
       && key.kind == KeyEventKind::Press
     {
-      app.handle_key(key, rpc, terminal);
+      app.handle_key(key, terminal);
     }
   }
   Ok(())
@@ -54,11 +57,15 @@ pub struct App {
   pub refresh_error: Option<String>,
   pub action_error: Option<String>,
   pub next_refresh: Instant,
+  pub refreshing: bool,
   pub exit: bool,
+  job_sender: Sender<Job>,
+  reply_receiver: Receiver<Reply>,
 }
 
 impl App {
-  fn new() -> Self {
+  fn new(rpc: Rpc) -> Self {
+    let (job_sender, reply_receiver) = worker::spawn(rpc);
     Self {
       snapshot: Snapshot::default(),
       selection: TableState::default().with_selected(Some(0)),
@@ -67,37 +74,16 @@ impl App {
       refresh_error: None,
       action_error: None,
       next_refresh: Instant::now(),
+      refreshing: false,
       exit: false,
+      job_sender,
+      reply_receiver,
     }
-  }
-
-  fn refresh(&mut self, rpc: &mut Rpc) {
-    match fetch(rpc) {
-      Ok(new) => {
-        keep_selected_torrent(
-          &mut self.selection,
-          &self.snapshot.torrents,
-          &new.torrents,
-        );
-        self.snapshot = new;
-        self.refresh_error = None;
-      }
-      Err(e) => self.refresh_error = Some(e.to_string()),
-    }
-    if let Mode::Details(hash) = &self.mode {
-      match fetch_details(rpc, hash) {
-        Ok(Some(new)) => self.details = Some(new),
-        Ok(None) => self.mode = Mode::List,
-        Err(e) => self.refresh_error = Some(e.to_string()),
-      }
-    }
-    self.next_refresh = Instant::now() + REFRESH;
   }
 
   fn handle_key(
     &mut self,
     key: event::KeyEvent,
-    rpc: &mut Rpc,
     terminal: &mut DefaultTerminal,
   ) {
     self.action_error = None;
@@ -107,6 +93,7 @@ impl App {
       .and_then(|index| self.snapshot.torrents.get(index));
     let mut action = None;
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
     match (&self.mode, key.code) {
       (Mode::DeleteAskData(hash), KeyCode::Char(answer @ ('y' | 'n'))) => {
         self.mode = Mode::DeleteConfirm {
@@ -117,10 +104,8 @@ impl App {
       (Mode::DeleteAskData(_), KeyCode::Esc) => self.mode = Mode::List,
       (Mode::DeleteAskData(_), _) => {}
       (Mode::DeleteConfirm { hash, delete_data }, KeyCode::Char('y')) => {
-        match delete_torrent(rpc, hash, *delete_data) {
-          Ok(()) => self.next_refresh = Instant::now(),
-          Err(e) => self.action_error = Some(e.to_string()),
-        }
+        let (hash, delete_data) = (hash.clone(), *delete_data);
+        self.act(move |rpc| delete_torrent(rpc, &hash, delete_data));
         self.mode = Mode::List;
       }
       // Just for safety measures, anything that isn't `y` during deletion
@@ -142,23 +127,18 @@ impl App {
       (_, KeyCode::Down | KeyCode::Char('j')) => self.selection.select_next(),
       (_, KeyCode::Enter | KeyCode::Char('i')) => {
         if let Some(torrent) = selected {
-          match fetch_details(rpc, &torrent.hash_string) {
-            Ok(Some(new)) => {
-              self.details = Some(new);
-              self.mode = Mode::Details(torrent.hash_string.clone());
-            }
-            Ok(None) => {}
-            Err(e) => self.action_error = Some(e.to_string()),
-          }
+          let hash = torrent.hash_string.clone();
+          // The popup appears once the details arrive.
+          self.details = None;
+          self.mode = Mode::Details(hash.clone());
+          self.request_details(hash);
         }
       }
       (_, KeyCode::Char('a')) => {
         match read_line(terminal, "Add torrent (magnet, URL or path)", "") {
           Ok(Some(source)) if !source.trim().is_empty() => {
-            match add_torrent(rpc, &resolve_source(source.trim())) {
-              Ok(()) => self.next_refresh = Instant::now(),
-              Err(e) => self.action_error = Some(e.to_string()),
-            }
+            let source = resolve_source(source.trim());
+            self.act(move |rpc| add_torrent(rpc, &source));
           }
           Ok(_) => {}
           Err(e) => self.action_error = Some(e.to_string()),
@@ -170,10 +150,8 @@ impl App {
             Ok(Some(location)) if !location.trim().is_empty() => {
               let location = resolve_path(location.trim());
               if Path::new(&location) != Path::new(&torrent.download_dir) {
-                match move_torrent(rpc, &torrent.hash_string, &location) {
-                  Ok(()) => self.next_refresh = Instant::now(),
-                  Err(e) => self.action_error = Some(e.to_string()),
-                }
+                let hash = torrent.hash_string.clone();
+                self.act(move |rpc| move_torrent(rpc, &hash, &location));
               }
             }
             Ok(_) => {}
@@ -187,11 +165,12 @@ impl App {
             Ok(Some(name))
               if !name.trim().is_empty() && name.trim() != torrent.name =>
             {
-              let hash = &torrent.hash_string;
-              match rename_torrent(rpc, hash, &torrent.name, name.trim()) {
-                Ok(()) => self.next_refresh = Instant::now(),
-                Err(e) => self.action_error = Some(e.to_string()),
-              }
+              let hash = torrent.hash_string.clone();
+              let old_name = torrent.name.clone();
+              let new_name = name.trim().to_owned();
+              self.act(move |rpc| {
+                rename_torrent(rpc, &hash, &old_name, &new_name)
+              });
             }
             Ok(_) => {}
             Err(e) => self.action_error = Some(e.to_string()),
@@ -213,20 +192,101 @@ impl App {
       (_, KeyCode::Char('v')) => action = Some("torrent-verify"),
       // Intentionally hidden from docs / Help popup.
       (_, KeyCode::Char('ç')) => {
-        match auto_sort_by_ratio(rpc, &self.snapshot.torrents) {
-          Ok(()) => self.next_refresh = Instant::now(),
-          Err(e) => self.action_error = Some(e.to_string()),
-        }
+        let torrents = self.snapshot.torrents.clone();
+        self.act(move |rpc| auto_sort_by_ratio(rpc, &torrents));
       }
       _ => {}
     }
 
     if let (Some(method), Some(torrent)) = (action, selected) {
-      match torrent_action(rpc, method, &torrent.hash_string) {
-        Ok(()) => self.next_refresh = Instant::now(),
-        Err(e) => self.action_error = Some(e.to_string()),
+      let hash = torrent.hash_string.clone();
+      self.act(move |rpc| torrent_action(rpc, method, &hash));
+    }
+  }
+
+  fn send(&self, job: impl 'static + Send + FnOnce(&mut Rpc) -> Reply) {
+    // A send only fails once the worker has stopped, which receive_replies
+    // reports.
+    let _ = self.job_sender.send(Box::new(job));
+  }
+
+  fn act<F>(&self, action: F)
+  where
+    F: 'static + Send + FnOnce(&mut Rpc) -> Result<(), Box<dyn Error>>,
+  {
+    self.send(move |rpc| Reply::Done(action(rpc).map_err(|e| e.to_string())));
+  }
+
+  fn request_details(&self, hash: String) {
+    self.send(move |rpc| {
+      let details = fetch_details(rpc, &hash)
+        .map(|details| details.map(Box::new))
+        .map_err(|e| e.to_string());
+      Reply::Details(hash, details)
+    });
+  }
+
+  fn refresh_if_due(&mut self) {
+    // One refresh at a time, so a slow daemon doesn't pile up requests.
+    if self.refreshing || Instant::now() < self.next_refresh {
+      return;
+    }
+    self.refreshing = true;
+    self.send(|rpc| Reply::Snapshot(fetch(rpc).map_err(|e| e.to_string())));
+    if let Mode::Details(hash) = &self.mode {
+      self.request_details(hash.clone());
+    }
+  }
+
+  fn receive_replies(&mut self) -> io::Result<()> {
+    loop {
+      let reply = match self.reply_receiver.try_recv() {
+        Ok(reply) => reply,
+        Err(TryRecvError::Empty) => return Ok(()),
+        Err(TryRecvError::Disconnected) => {
+          return Err(io::Error::other("the RPC worker stopped unexpectedly"));
+        }
+      };
+
+      match reply {
+        Reply::Snapshot(result) => {
+          self.refreshing = false;
+          self.next_refresh = Instant::now() + REFRESH;
+          match result {
+            Ok(new) => {
+              keep_selected_torrent(
+                &mut self.selection,
+                &self.snapshot.torrents,
+                &new.torrents,
+              );
+              self.snapshot = new;
+              self.refresh_error = None;
+            }
+            Err(e) => self.refresh_error = Some(e),
+          }
+        }
+        // Details can arrive after the popup was closed or switched to another
+        // torrent; only the open popup's torrent counts.
+        Reply::Details(hash, result) if self.showing_details_for(&hash) => {
+          match result {
+            Ok(Some(new)) => self.details = Some(*new),
+            Ok(None) => self.mode = Mode::List,
+            Err(e) => self.action_error = Some(e),
+          }
+        }
+        Reply::Details(..) => {}
+        Reply::Done(result) => {
+          if let Err(e) = result {
+            self.action_error = Some(e);
+          }
+          self.next_refresh = Instant::now();
+        }
       }
     }
+  }
+
+  fn showing_details_for(&self, hash: &str) -> bool {
+    matches!(&self.mode, Mode::Details(open) if open == hash)
   }
 }
 

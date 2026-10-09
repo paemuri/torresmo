@@ -100,7 +100,7 @@ mod tests {
   }
 
   impl Error for Wrapper {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+    fn source(&self) -> Option<&(dyn 'static + Error)> {
       Some(&self.0)
     }
   }

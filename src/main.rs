@@ -4,6 +4,7 @@ mod prompt;
 mod rpc;
 mod transmission;
 mod ui;
+mod worker;
 
 use std::error::Error;
 use std::process::ExitCode;
@@ -50,7 +51,7 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-  let mut rpc = Rpc::new()?;
-  ratatui::run(|terminal| app::show(terminal, &mut rpc))?;
+  let rpc = Rpc::new()?;
+  ratatui::run(|terminal| app::show(terminal, rpc))?;
   Ok(())
 }
