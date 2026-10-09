@@ -67,7 +67,7 @@ impl App {
     let (job_sender, reply_receiver) = worker::spawn(rpc);
     Self {
       snapshot: Snapshot::default(),
-      selection: TableState::default().with_selected(Some(0)),
+      selection: TableState::default(),
       mode: Mode::List,
       details: None,
       refresh_error: None,
@@ -295,6 +295,7 @@ fn keep_selected_torrent(
   new: &[Torrent],
 ) {
   let selected = selection.selected().and_then(|index| old.get(index));
+
   // If the torrent is gone, the selection keeps its row number.
   if let Some(index) = selected.and_then(|selected| {
     new
@@ -302,6 +303,11 @@ fn keep_selected_torrent(
       .position(|torrent| torrent.hash_string == selected.hash_string)
   }) {
     selection.select(Some(index));
+  }
+
+  // Nothing selected, for example on the first refresh: start at the top.
+  if selection.selected().is_none() && !new.is_empty() {
+    selection.select(Some(0));
   }
 }
 
@@ -356,5 +362,19 @@ mod tests {
     let mut selection = TableState::default().with_selected(Some(0));
     keep_selected_torrent(&mut selection, &[], &torrents(&["a", "b"]));
     assert_eq!(selection.selected(), Some(0));
+  }
+
+  #[test]
+  fn selection_starts_on_the_first_torrent() {
+    let mut selection = TableState::default();
+    keep_selected_torrent(&mut selection, &[], &torrents(&["a", "b"]));
+    assert_eq!(selection.selected(), Some(0));
+  }
+
+  #[test]
+  fn no_selection_without_torrents() {
+    let mut selection = TableState::default();
+    keep_selected_torrent(&mut selection, &[], &[]);
+    assert_eq!(selection.selected(), None);
   }
 }
