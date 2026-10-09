@@ -46,10 +46,16 @@ impl App {
           table_row(row.each_ref().map(String::as_str))
             .style(error_style(torrent.error))
         });
+    let highlight = self
+      .selection
+      .selected()
+      .and_then(|index| self.snapshot.torrents.get(index))
+      .and_then(|torrent| error_color(torrent.error))
+      .unwrap_or(Color::White);
     let table = Table::new(rows, widths)
       .column_spacing(COLUMN_SPACING)
       .header(table_row(HEADERS).bold())
-      .row_highlight_style(Style::new().bg(Color::White).fg(Color::Black));
+      .row_highlight_style(Style::new().bg(highlight).fg(Color::Black));
     let footer =
       match self.refresh_error.as_ref().or(self.action_error.as_ref()) {
         Some(error) => Line::from(format!("Error: {error}")).red(),
@@ -350,13 +356,17 @@ fn column_widths(cells: &[[String; COLUMNS]]) -> [Constraint; COLUMNS] {
   constraints
 }
 
-fn error_style(error: u64) -> Style {
+fn error_color(error: u64) -> Option<Color> {
   // Transmission: 1 and 2 are tracker warnings/errors, 3 is a local error.
   match error {
-    1 | 2 => Style::new().yellow(),
-    3 => Style::new().red(),
-    _ => Style::new(),
+    1 | 2 => Some(Color::Yellow),
+    3 => Some(Color::Red),
+    _ => None,
   }
+}
+
+fn error_style(error: u64) -> Style {
+  error_color(error).map_or(Style::new(), |color| Style::new().fg(color))
 }
 
 fn table_row<'a, T: Into<Line<'a>>>(cells: [T; COLUMNS]) -> Row<'a> {
