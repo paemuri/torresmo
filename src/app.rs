@@ -23,7 +23,6 @@ const REFRESH: Duration = Duration::from_secs(1);
 // How long to wait for a key before checking the worker's replies again.
 const POLL: Duration = Duration::from_millis(50);
 
-#[derive(Clone, PartialEq)]
 pub enum Mode {
   List,
   Help,

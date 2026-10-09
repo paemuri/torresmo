@@ -35,8 +35,11 @@ fn main() -> ExitCode {
       println!("{HELP}");
       return ExitCode::SUCCESS;
     }
-    ["-v" | "--version" | "-h" | "--help", flag, ..] | [flag, ..] => {
-      eprintln!("unknown flag: {flag}\nRun `torresmo --help` for usage.");
+    [_, ..] => {
+      eprintln!(
+        "unknown arguments: {}\nRun `torresmo --help` for usage.",
+        args.join(" "),
+      );
       return ExitCode::from(2);
     }
   }
