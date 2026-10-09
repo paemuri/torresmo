@@ -1,7 +1,7 @@
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Constraint, Layout, Margin};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Clear, Padding, Paragraph, Row, Table, Wrap};
@@ -27,6 +27,7 @@ impl App {
     let [table_area, footer_area] =
       Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
         .areas(frame.area());
+    let table_area = table_area.inner(Margin::new(1, 0));
 
     let mut cells: Vec<[String; COLUMNS]> =
       self.snapshot.torrents.iter().map(torrent_cells).collect();
