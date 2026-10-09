@@ -16,6 +16,8 @@ use crate::transmission::{Snapshot, Torrent, TorrentDetails};
 const COLUMNS: usize = 9;
 const NAME_COLUMN: usize = 1;
 const COLUMN_SPACING: u16 = 2;
+const KEY_WIDTH: usize = 17;
+const LABEL_WIDTH: usize = 13;
 const HEADERS: [&str; COLUMNS] = [
   "#", "Name", "State", "Size", "%", "ETA", "Down", "Up", "Ratio",
 ];
@@ -132,23 +134,23 @@ fn footer_text(snapshot: &Snapshot) -> String {
 
 fn help_text(snapshot: &Snapshot) -> Text<'static> {
   Text::from(vec![
-    field("↑ ↓ / k j", "Move the selection".into(), 17),
-    field("Shift+↑ ↓ / K J", "Move in the queue".into(), 17),
-    field("i / Enter", "Show the torrent details".into(), 17),
-    field("s", "Toggle pause (start/stop)".into(), 17),
-    field("S", "Start now, skipping the queue".into(), 17),
-    field("v", "Verify the downloaded data".into(), 17),
-    field("a", "Add a torrent".into(), 17),
-    field("m", "Move the data".into(), 17),
-    field("r", "Rename the torrent".into(), 17),
-    field("d / Del / Bksp", "Delete the torrent".into(), 17),
-    field("Esc", "Close the popup".into(), 17),
-    field("h / F1", "Show help".into(), 17),
-    field("q", "Quit".into(), 17),
+    field("↑ ↓ / k j", "Move the selection".into(), KEY_WIDTH),
+    field("Shift+↑ ↓ / K J", "Move in the queue".into(), KEY_WIDTH),
+    field("i / Enter", "Show the torrent details".into(), KEY_WIDTH),
+    field("s", "Toggle pause (start/stop)".into(), KEY_WIDTH),
+    field("S", "Start now, skipping the queue".into(), KEY_WIDTH),
+    field("v", "Verify the downloaded data".into(), KEY_WIDTH),
+    field("a", "Add a torrent".into(), KEY_WIDTH),
+    field("m", "Move the data".into(), KEY_WIDTH),
+    field("r", "Rename the torrent".into(), KEY_WIDTH),
+    field("d / Del / Bksp", "Delete the torrent".into(), KEY_WIDTH),
+    field("Esc", "Close the popup".into(), KEY_WIDTH),
+    field("h / F1", "Show help".into(), KEY_WIDTH),
+    field("q", "Quit".into(), KEY_WIDTH),
     Line::default(),
-    field("Location", snapshot.download_dir.clone(), 13),
-    field("Transmission", snapshot.version.clone(), 13),
-    field("Torresmo", env!("CARGO_PKG_VERSION").into(), 13),
+    field("Location", snapshot.download_dir.clone(), LABEL_WIDTH),
+    field("Transmission", snapshot.version.clone(), LABEL_WIDTH),
+    field("Torresmo", env!("CARGO_PKG_VERSION").into(), LABEL_WIDTH),
   ])
 }
 
@@ -188,29 +190,32 @@ fn details_text(details: &TorrentDetails) -> Text<'static> {
     _ => "high",
   };
 
-  let width = 13;
   let mut lines = vec![
-    field("Name", details.name.clone(), width),
-    field("Hash", details.hash_string.clone(), width),
-    field("Location", details.download_dir.clone(), width),
+    field("Name", details.name.clone(), LABEL_WIDTH),
+    field("Hash", details.hash_string.clone(), LABEL_WIDTH),
+    field("Location", details.download_dir.clone(), LABEL_WIDTH),
     field(
       "Labels",
       or_dash(&details.labels.as_deref().unwrap_or_default().join(", ")),
-      width,
+      LABEL_WIDTH,
     ),
     field(
       "Private",
       if details.is_private { "yes" } else { "no" }.into(),
-      width,
+      LABEL_WIDTH,
     ),
-    field("Creator", or_dash(&details.creator), width),
-    field("Comment", or_dash(&details.comment), width),
+    field("Creator", or_dash(&details.creator), LABEL_WIDTH),
+    field("Comment", or_dash(&details.comment), LABEL_WIDTH),
     Line::default(),
-    field("State", status_label(details.status).to_owned(), width),
+    field(
+      "State",
+      status_label(details.status).to_owned(),
+      LABEL_WIDTH,
+    ),
   ];
   if details.error != 0 {
     lines.push(
-      field("Error", details.error_string.clone(), width)
+      field("Error", details.error_string.clone(), LABEL_WIDTH)
         .style(error_style(details.error)),
     );
   }
@@ -218,9 +223,9 @@ fn details_text(details: &TorrentDetails) -> Text<'static> {
     field(
       "Progress",
       format!("{:.0}%", (details.percent_done * 100.0).floor()),
-      width,
+      LABEL_WIDTH,
     ),
-    field("ETA", format_duration(details.eta), width),
+    field("ETA", format_duration(details.eta), LABEL_WIDTH),
     field(
       "Speed",
       format!(
@@ -228,7 +233,7 @@ fn details_text(details: &TorrentDetails) -> Text<'static> {
         format_bytes(details.rate_download),
         format_bytes(details.rate_upload),
       ),
-      width,
+      LABEL_WIDTH,
     ),
     field(
       "Peers",
@@ -238,16 +243,16 @@ fn details_text(details: &TorrentDetails) -> Text<'static> {
         details.peers_sending_to_us,
         details.peers_getting_from_us,
       ),
-      width,
+      LABEL_WIDTH,
     ),
     field(
       "Queue",
       format!("position {}, {priority} priority", details.queue_position),
-      width,
+      LABEL_WIDTH,
     ),
     Line::default(),
-    field("Size", size, width),
-    field("Left", format_bytes(details.left_until_done), width),
+    field("Size", size, LABEL_WIDTH),
+    field("Left", format_bytes(details.left_until_done), LABEL_WIDTH),
     field(
       "Downloaded",
       format!(
@@ -255,10 +260,10 @@ fn details_text(details: &TorrentDetails) -> Text<'static> {
         format_bytes(details.downloaded_ever),
         format_bytes(details.corrupt_ever),
       ),
-      width,
+      LABEL_WIDTH,
     ),
-    field("Uploaded", format_bytes(details.uploaded_ever), width),
-    field("Ratio", format_ratio(details.upload_ratio), width),
+    field("Uploaded", format_bytes(details.uploaded_ever), LABEL_WIDTH),
+    field("Ratio", format_ratio(details.upload_ratio), LABEL_WIDTH),
     field(
       "Pieces",
       format!(
@@ -266,23 +271,27 @@ fn details_text(details: &TorrentDetails) -> Text<'static> {
         details.piece_count,
         format_bytes(details.piece_size),
       ),
-      width,
+      LABEL_WIDTH,
     ),
     field(
       "Files",
       details.file_count.map_or("?".into(), |n| n.to_string()),
-      width,
+      LABEL_WIDTH,
     ),
     Line::default(),
-    field("Added", date(details.added_date), width),
-    field("Completed", date(details.done_date), width),
-    field("Last active", date(details.activity_date), width),
+    field("Added", date(details.added_date), LABEL_WIDTH),
+    field("Completed", date(details.done_date), LABEL_WIDTH),
+    field("Last active", date(details.activity_date), LABEL_WIDTH),
     field(
       "Downloading",
       format_duration(details.seconds_downloading),
-      width,
+      LABEL_WIDTH,
     ),
-    field("Seeding", format_duration(details.seconds_seeding), width),
+    field(
+      "Seeding",
+      format_duration(details.seconds_seeding),
+      LABEL_WIDTH,
+    ),
     Line::default(),
     Line::from("Trackers").bold(),
   ]);
