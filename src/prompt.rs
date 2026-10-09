@@ -69,7 +69,7 @@ pub fn resolve_source(input: &str) -> String {
   // Magnet links and URLs go to the daemon as typed; anything else is a local
   // path.
   if input.starts_with("magnet:") || input.contains("://") {
-    return input.to_owned()
+    return input.to_owned();
   }
   resolve_path(input)
 }
