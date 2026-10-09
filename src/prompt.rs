@@ -26,7 +26,6 @@ pub fn read_line(
   label: &str,
   initial: &str,
 ) -> Result<Option<String>, Box<dyn Error>> {
-  let height = terminal.size()?.height;
   disable_raw_mode()?;
   // Clear screen, show label in first line, prompt in the second line.
   let line = execute!(
@@ -66,7 +65,24 @@ fn edit_line(initial: &str) -> rustyline::Result<String> {
   editor.readline_with_initial("", (initial, ""))
 }
 
-pub fn expand_home(path: &str) -> String {
+pub fn resolve_source(input: &str) -> String {
+  // Magnet links and URLs go to the daemon as typed; anything else is a local
+  // path.
+  if input.starts_with("magnet:") || input.contains("://") {
+    return input.to_owned()
+  }
+  resolve_path(input)
+}
+
+pub fn resolve_path(input: &str) -> String {
+  let expanded = expand_home(input);
+  // Resolve to abs path for the daemon, as rel paths should be accepted as
+  // input.
+  std::path::absolute(&expanded)
+    .map_or(expanded, |path| path.to_string_lossy().into_owned())
+}
+
+fn expand_home(path: &str) -> String {
   match (path.strip_prefix("~/"), std::env::var("HOME")) {
     (Some(rest), Ok(home)) => format!("{home}/{rest}"),
     _ => path.to_owned(),
@@ -92,5 +108,28 @@ mod tests {
     );
     assert_eq!(expand_home("~other/movies"), "~other/movies");
     assert_eq!(expand_home("~"), "~");
+  }
+
+  #[test]
+  fn relative_paths_become_absolute() {
+    let current = std::env::current_dir().unwrap();
+    let expected = current.join("movies/x.torrent");
+    assert_eq!(resolve_path("movies/x.torrent"), expected.to_string_lossy());
+  }
+
+  #[test]
+  fn absolute_and_home_paths_stay_absolute() {
+    let home = std::env::var("HOME").unwrap();
+    assert_eq!(resolve_path("/downloads"), "/downloads");
+    assert_eq!(resolve_path("~/movies"), format!("{home}/movies"));
+  }
+
+  #[test]
+  fn magnets_and_urls_are_sent_as_typed() {
+    let magnet = "magnet:?xt=urn:btih:abc";
+    let url = "https://example.org/x.torrent";
+    assert_eq!(resolve_source(magnet), magnet);
+    assert_eq!(resolve_source(url), url);
+    assert!(resolve_source("x.torrent").starts_with('/'));
   }
 }

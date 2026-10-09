@@ -8,7 +8,7 @@ use ratatui::crossterm::event::{
 };
 use ratatui::widgets::TableState;
 
-use crate::prompt::{expand_home, read_line};
+use crate::prompt::{read_line, resolve_path, resolve_source};
 use crate::rpc::Rpc;
 use crate::transmission::{
   Snapshot, Torrent, TorrentDetails, TorrentStatus, add_torrent,
@@ -154,7 +154,7 @@ impl App {
       (_, KeyCode::Char('a')) => {
         match read_line(terminal, "Add torrent (magnet, URL or path)", "") {
           Ok(Some(source)) if !source.trim().is_empty() => {
-            match add_torrent(rpc, &expand_home(source.trim())) {
+            match add_torrent(rpc, &resolve_source(source.trim())) {
               Ok(()) => self.next_refresh = Instant::now(),
               Err(e) => self.action_error = Some(e.to_string()),
             }
@@ -167,7 +167,7 @@ impl App {
         if let Some(torrent) = selected {
           match read_line(terminal, "Move data to", &torrent.download_dir) {
             Ok(Some(location)) if !location.trim().is_empty() => {
-              let location = expand_home(location.trim());
+              let location = resolve_path(location.trim());
               if Path::new(&location) != Path::new(&torrent.download_dir) {
                 match move_torrent(rpc, &torrent.hash_string, &location) {
                   Ok(()) => self.next_refresh = Instant::now(),
