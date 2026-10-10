@@ -76,8 +76,8 @@ pub fn resolve_source(input: &str) -> String {
 
 pub fn resolve_path(input: &str) -> String {
   let expanded = expand_home(input);
-  // Resolve to abs path for the daemon, as rel paths should be accepted as
-  // input.
+  // Resolve to abs path for the daemon. Rel paths should be accepted as input
+  // and, obviously, that messes up the daemon.
   std::path::absolute(&expanded)
     .map_or(expanded, |path| path.to_string_lossy().into_owned())
 }

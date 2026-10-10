@@ -10,10 +10,9 @@ Dead simple and minimal TUI client for Transmission daemon/service.
 
 ## Why?
 
-Torresmo is a deliberately tiny alternative to full-featured clients like
-[Rustmission][2] or other TUI projects: no configuration, no sorting, no tabs.
-It shows your torrents in queue order and lets you manage them, and nothing
-else.
+Torresmo is a tiny alternative to full-featured clients like [Rustmission][2] or
+other TUI projects. You can list torrents and see their info, add/delete them,
+and sort them manually in the queue. That's it.
 
 ## Installation
 

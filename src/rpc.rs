@@ -32,8 +32,8 @@ impl Rpc {
     let body = json!({ "method": method, "arguments": arguments });
     let mut response = self.send(&body)?;
 
-    // Transmission's CSRF protection: a call without a valid session id is
-    // rejected with 409, which carries the id to retry with.
+    // Transmission's CSRF protection: a call without a valid session ID is
+    // rejected with 409, which carries the ID to retry with.
     if response.status() == StatusCode::CONFLICT {
       let session_id = response
         .headers()

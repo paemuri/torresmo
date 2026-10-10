@@ -305,7 +305,7 @@ fn keep_selected_torrent(
     selection.select(Some(index));
   }
 
-  // Nothing selected, for example on the first refresh: start at the top.
+  // Start at the top when nothing's selected (e.g. on first refresh).
   if selection.selected().is_none() && !new.is_empty() {
     selection.select(Some(0));
   }
