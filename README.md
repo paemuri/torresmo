@@ -6,13 +6,13 @@
 
 ## About
 
-Dead simple and minimal TUI client for Transmission daemon/service.
+Dead-simple and minimal TUI client for the Transmission daemon.
 
 ## Why?
 
-Torresmo is a tiny alternative to full-featured clients like [Rustmission][2] or
-other TUI projects. You can list torrents and see their info, add/delete them,
-and sort them manually in the queue. That's it.
+Torresmo is a tiny alternative to full-featured clients like [Rustmission][1] or
+other TUI projects. It doesn't contain everything but the kitchen sink, while
+still being able to do _everything_ I personally wanted in a torrent client.
 
 ## Installation
 
@@ -63,7 +63,7 @@ meantime, nothing will be added unless I see a valid use case for it.
 ### Table sorting
 
 The table is always ordered by queue position, the `#` column. You can also move
-torrents in the queue, which immediately shows in the table's order. Adding
+torrents in the queue, and that immediately shows in the table's order. Adding
 sorting on top of that would add unnecessary complexity, and I don't want that.
 
 ### Remote Transmission
@@ -83,21 +83,26 @@ Too complex for this project's scope.
 
 ### Limits and priorities
 
-No speed limits, no bandwidth priority, no "turtle mode". The only existing
-concept is the queue order.
+No speed limits, no bandwidth priority, no "turtle mode". The only priority
+Torresmo knows is the queue order.
 
-## License
+## Source code
 
-This project code is in the public domain. See the [LICENSE file][1].
+The main repository is on [SourceHut][2]. A mirror exists on [GitHub][3] for
+convenience, but it might occasionally be outdated.
 
-### Contribution
+### License and contribution
+
+This project's code is in the public domain. See the [LICENSE file][4].
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you shall be in the public domain, without any
 additional terms or conditions.
 
-[1]: ./LICENSE
-[2]: https://github.com/intuis/rustmission
+[1]: https://github.com/intuis/rustmission
+[2]: https://git.sr.ht/~paemuri/torresmo
+[3]: https://github.com/paemuri/torresmo
+[4]: ./LICENSE
 
 [badge-1-img]: https://img.shields.io/badge/license-Unlicense-green?style=flat-square
 [badge-1-link]: ./LICENSE

@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use rpc::Rpc;
 
 const HELP: &str = "\
-Dead simple and minimal TUI client for the Transmission daemon.
+Dead-simple and minimal TUI client for the Transmission daemon.
 
 Usage: torresmo [OPTION]
 
