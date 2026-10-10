@@ -27,11 +27,11 @@ fn main() -> ExitCode {
   let args: Vec<&str> = args.iter().map(String::as_str).collect();
   match args.as_slice() {
     [] => {}
-    ["-v" | "--version"] => {
+    ["-v" | "--version" | "version"] => {
       println!("torresmo {}", env!("CARGO_PKG_VERSION"));
       return ExitCode::SUCCESS;
     }
-    ["-h" | "--help"] => {
+    ["-h" | "--help" | "help"] => {
       println!("{HELP}");
       return ExitCode::SUCCESS;
     }
