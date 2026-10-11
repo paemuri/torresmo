@@ -37,7 +37,7 @@ fn main() -> ExitCode {
     }
     [_, ..] => {
       eprintln!(
-        "unknown arguments: {}\nRun `torresmo --help` for usage.",
+        "torresmo: unknown arguments: {}\nRun `torresmo --help` for usage.",
         args.join(" "),
       );
       return ExitCode::from(2);
@@ -47,7 +47,7 @@ fn main() -> ExitCode {
   match run() {
     Ok(()) => ExitCode::SUCCESS,
     Err(e) => {
-      eprintln!("Error: {e}");
+      eprintln!("torresmo: {e}");
       ExitCode::FAILURE
     }
   }
