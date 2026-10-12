@@ -14,6 +14,10 @@ Torresmo is a tiny alternative to full-featured clients like [Rustmission][1] or
 other TUI projects. It doesn't contain everything but the kitchen sink, while
 still being able to do _everything_ I personally wanted in a torrent client.
 
+## Demo
+
+[![Demo](https://asciinema.org/a/1268157.svg "Demo")][2]
+
 ## Installation
 
 AUR / Arch Linux:
@@ -102,6 +106,7 @@ for inclusion in the work by you shall be in the public domain, without any
 additional terms or conditions.
 
 [1]: https://github.com/intuis/rustmission
+[2]: https://asciinema.org/a/1268157
 
 [badge-1-img]: https://img.shields.io/badge/license-Unlicense-green?style=flat-square
 [badge-1-link]: ./LICENSE
