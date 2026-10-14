@@ -46,8 +46,7 @@ cargo install torresmo
 
 ## Usage
 
-Start the Transmission daemon (it must listen on `localhost:9091`, without
-authentication), then run:
+Start the Transmission daemon (without authentication), then run:
 
 ```sh
 torresmo
@@ -72,8 +71,9 @@ sorting on top of that would add unnecessary complexity, and I don't want that.
 
 ### Remote Transmission
 
-To run Torresmo, it's required to have the Transmission daemon running at
-`localhost:9091`, without authentication.
+To run Torresmo, it's required to have the Transmission daemon running locally,
+without authentication. Torresmo connects through the Unix socket at
+`$XDG_RUNTIME_DIR/transmission.sock` if it exists, or through `localhost:9091`.
 
 ### Search and filtering
 
