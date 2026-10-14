@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use reqwest::StatusCode;
@@ -7,6 +8,7 @@ use reqwest::header::HeaderValue;
 use serde_json::{Value, json};
 
 const URL: &str = "http://localhost:9091/transmission/rpc";
+const SOCKET_NAME: &str = "transmission.sock";
 const SESSION_HEADER: &str = "X-Transmission-Session-Id";
 const TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -17,7 +19,14 @@ pub struct Rpc {
 
 impl Rpc {
   pub fn new() -> Result<Self, Box<dyn Error>> {
-    let client = Client::builder().timeout(TIMEOUT).build()?;
+    let mut builder = Client::builder().timeout(TIMEOUT);
+    // If there's any $XDG_RUNTIME_DIR/transmission.sock, use it. Otherwise,
+    // connect through default localhost:9091.
+    #[cfg(unix)]
+    if let Some(socket) = socket_path() {
+      builder = builder.unix_socket(socket);
+    }
+    let client = builder.build()?;
     Ok(Self {
       client,
       session_id: None,
@@ -76,6 +85,16 @@ impl Rpc {
   }
 }
 
+fn socket_path() -> Option<PathBuf> {
+  let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
+  socket_in(Path::new(&runtime_dir))
+}
+
+fn socket_in(runtime_dir: &Path) -> Option<PathBuf> {
+  let socket = runtime_dir.join(SOCKET_NAME);
+  socket.exists().then_some(socket)
+}
+
 fn root_cause(error: &dyn Error) -> String {
   let mut cause = error;
   while let Some(source) = cause.source() {
@@ -115,5 +134,17 @@ mod tests {
   fn root_cause_of_a_plain_error_is_itself() {
     let error = io::Error::other("timed out");
     assert_eq!(root_cause(&error), "timed out");
+  }
+
+  #[test]
+  fn socket_is_used_only_when_it_exists() {
+    let dir = std::env::temp_dir().join("torresmo-socket-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let socket = dir.join(SOCKET_NAME);
+    let _ = std::fs::remove_file(&socket);
+    assert_eq!(socket_in(&dir), None);
+    std::fs::write(&socket, "").unwrap();
+    assert_eq!(socket_in(&dir), Some(socket));
+    std::fs::remove_dir_all(&dir).unwrap();
   }
 }
