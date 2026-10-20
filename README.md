@@ -92,9 +92,9 @@ Torresmo knows is the queue order.
 
 ## Source code
 
-The main repository is on [SourceHut][source-srht]. A mirror exists on
-[GitHub][source-github] for convenience, but it might occasionally be
-outdated.
+The main repository is on [SourceHut][source-srht]. Mirrors exist on
+[Codeberg][source-codeberg] and [GitHub][source-github] for convenience, but
+they might occasionally be outdated.
 
 ### License and contribution
 
@@ -116,5 +116,6 @@ additional terms or conditions.
 [badge-3-link]: https://aur.archlinux.org/packages/torresmo
 
 [source-srht]: https://git.sr.ht/~paemuri/torresmo
+[source-codeberg]: https://codeberg.org/paemuri/torresmo
 [source-github]: https://github.com/paemuri/torresmo
 [source-license]: ./LICENSE
