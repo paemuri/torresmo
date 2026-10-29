@@ -16,7 +16,7 @@ still being able to do _everything_ I personally wanted in a torrent client.
 
 ## Demo
 
-[![Demo](https://asciinema.org/a/1270343.svg "Demo")][2]
+[![Demo](https://asciinema.org/a/1270435.svg "Demo")][2]
 
 ## Installation
 
@@ -106,7 +106,7 @@ for inclusion in the work by you shall be in the public domain, without any
 additional terms or conditions.
 
 [1]: https://github.com/intuis/rustmission
-[2]: https://asciinema.org/a/1270343
+[2]: https://asciinema.org/a/1270435
 
 [badge-1-img]: https://img.shields.io/badge/license-Unlicense-green?style=flat-square
 [badge-1-link]: ./LICENSE
