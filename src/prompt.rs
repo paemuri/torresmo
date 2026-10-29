@@ -122,8 +122,8 @@ fn path_completions(input: &str) -> Vec<Pair> {
   // Keep the directory as typed, so `~/` stays `~/` in the replacement.
   let typed_dir = &input[..input.len() - typed_entry.len()];
 
-  // This simply `ls` on dir (or `.`, if empty) and compare the entries. If
-  // typed_entry is a prefix to the actual entry, add it as a possible match. In
+  // Simply run `ls` on dir (or `.`, if empty) and compare the entries. If 
+  // typed_entry is a prefix of the actual entry, add it as a possible match. In
   // the end, those matches will be shown as candidates during tab completion.
   let mut matches = Vec::new();
   if let Ok(entries) = fs::read_dir(if dir.is_empty() { "." } else { dir }) {
