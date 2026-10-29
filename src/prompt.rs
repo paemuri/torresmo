@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::fs;
 use std::io;
 
 use ratatui::DefaultTerminal;
@@ -8,17 +9,36 @@ use ratatui::crossterm::style::Print;
 use ratatui::crossterm::terminal::{
   Clear as ClearTerminal, ClearType, disable_raw_mode, enable_raw_mode,
 };
-use rustyline::completion::FilenameCompleter;
+use rustyline::Context;
+use rustyline::completion::{Completer as CompleterTrait, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::{
   Cmd, Completer, CompletionType, Config, Editor, Helper, Highlighter, Hinter,
   KeyEvent, Modifiers, Validator,
 };
 
+/// Custom path completer. Completes paths without shell escaping.
+struct PathCompleter;
+
+impl CompleterTrait for PathCompleter {
+  type Candidate = Pair;
+
+  fn complete(
+    &self,
+    line: &str,
+    pos: usize,
+    _ctx: &Context<'_>,
+  ) -> rustyline::Result<(usize, Vec<Pair>)> {
+    // Returning start 0 makes the candidate replace the whole line, so
+    // rustyline doesn't split it into words at spaces.
+    Ok((0, path_completions(&line[..pos])))
+  }
+}
+
 #[derive(Helper, Completer, Highlighter, Hinter, Validator)]
 struct PathHelper {
   #[rustyline(Completer)]
-  completer: FilenameCompleter,
+  completer: PathCompleter,
 }
 
 pub fn read_line(
@@ -56,7 +76,7 @@ fn edit_line(initial: &str) -> rustyline::Result<String> {
       .build(),
   )?;
   editor.set_helper(Some(PathHelper {
-    completer: FilenameCompleter::new(),
+    completer: PathCompleter,
   }));
   editor.bind_sequence(
     KeyEvent(rustyline::KeyCode::Esc, Modifiers::NONE),
@@ -80,23 +100,43 @@ pub fn is_local(input: &str) -> bool {
 
 pub fn resolve_path(input: &str) -> String {
   let expanded = expand_home(input);
-  let expanded = unescape_completion(expanded);
   // Resolve to abs path for the daemon. Rel paths should be accepted as input
   // and, obviously, that messes up the daemon.
   std::path::absolute(&expanded)
     .map_or(expanded, |path| path.to_string_lossy().into_owned())
 }
 
-fn unescape_completion(path: String) -> String {
-  #[cfg(unix)]
-  {
-    // Rustyline outputs a shell-escaped string. This simply removes any `\`
-    // from the path.
-    if path.contains('\\') && !std::path::Path::new(&path).exists() {
-      return rustyline::completion::unescape(&path, Some('\\')).into_owned();
+// Tab completion during intput (rustyline).
+fn path_completions(input: &str) -> Vec<Pair> {
+  let expanded = expand_home(input);
+  let (dir, typed_entry) = match expanded.rfind('/') {
+    Some(index) => (&expanded[..=index], &expanded[index + 1..]),
+    None => ("", expanded.as_str()),
+  };
+  // Keep the directory as typed, so `~/` stays `~/` in the replacement.
+  let typed_dir = &input[..input.len() - typed_entry.len()];
+
+  let mut matches = Vec::new();
+  if let Ok(entries) = fs::read_dir(if dir.is_empty() { "." } else { dir }) {
+    for entry in entries.flatten() {
+      let Ok(name) = entry.file_name().into_string() else {
+        continue;
+      };
+      if !name.starts_with(typed_entry) {
+        continue;
+      }
+      let mut replacement = format!("{typed_dir}{name}");
+      if entry.path().is_dir() {
+        replacement.push('/');
+      }
+      matches.push(Pair {
+        display: name,
+        replacement,
+      });
     }
   }
-  path
+  matches.sort_by(|a, b| a.display.cmp(&b.display));
+  matches
 }
 
 fn expand_home(path: &str) -> String {
@@ -169,35 +209,7 @@ mod tests {
 
   #[cfg(unix)]
   #[test]
-  fn completion_escapes_are_removed() {
-    let dir = fresh_dir("unescape");
-    let file = dir.join("a b.torrent");
-    std::fs::write(&file, "").unwrap();
-    assert_eq!(
-      resolve_path(dir.join("a\\ b.torrent").to_str().unwrap()),
-      file.to_string_lossy()
-    );
-    std::fs::remove_dir_all(&dir).unwrap();
-  }
-
-  #[cfg(unix)]
-  #[test]
-  fn several_completion_escapes_are_removed() {
-    let dir = fresh_dir("many-escapes");
-    let file = dir.join("[AUTHOR] Name of the media.torrent");
-    std::fs::write(&file, "").unwrap();
-    let completed =
-      dir.join("[AUTHOR]\\ Name\\ of\\ the\\ media.torrent");
-    assert_eq!(
-      resolve_path(completed.to_str().unwrap()),
-      file.to_string_lossy()
-    );
-    std::fs::remove_dir_all(&dir).unwrap();
-  }
-
-  #[cfg(unix)]
-  #[test]
-  fn unescaped_paths_with_spaces_are_untouched() {
+  fn paths_with_spaces_are_untouched() {
     let dir = fresh_dir("spaces");
     let file = dir.join("a b.torrent");
     std::fs::write(&file, "").unwrap();
@@ -217,57 +229,57 @@ mod tests {
 
   #[cfg(unix)]
   #[test]
-  fn completion_of_a_backslash_filename_is_unescaped_once() {
-    let dir = fresh_dir("backslash-completion");
-    // The real name has both a backslash and a space.
-    let file = dir.join("a\\ b.torrent");
-    std::fs::write(&file, "").unwrap();
-    // Rustyline escapes the backslash as `\\` and the space as `\ `.
-    let completed = dir.join("a\\\\\\ b.torrent");
+  fn shell_escapes_are_not_interpreted() {
+    let dir = fresh_dir("literal-escapes");
+    let escaped = dir.join("a\\ b.torrent");
     assert_eq!(
-      resolve_path(completed.to_str().unwrap()),
-      file.to_string_lossy()
+      resolve_path(escaped.to_str().unwrap()),
+      escaped.to_string_lossy()
     );
     std::fs::remove_dir_all(&dir).unwrap();
   }
 
   #[cfg(unix)]
   #[test]
-  fn nonexistent_escaped_paths_are_unescaped() {
-    let dir = fresh_dir("nonexistent");
-    let completed = dir.join("missing\\ file.torrent");
-    assert_eq!(
-      resolve_path(completed.to_str().unwrap()),
-      dir.join("missing file.torrent").to_string_lossy()
-    );
-    std::fs::remove_dir_all(&dir).unwrap();
-  }
-
-  #[cfg(unix)]
-  #[test]
-  fn literal_escaped_path_wins_when_both_forms_exist() {
-    let dir = fresh_dir("ambiguous");
-    let literal = dir.join("a\\ b.torrent");
-    let plain = dir.join("a b.torrent");
-    std::fs::write(&literal, "").unwrap();
-    std::fs::write(&plain, "").unwrap();
-    assert_eq!(
-      resolve_path(dir.join("a\\ b.torrent").to_str().unwrap()),
-      literal.to_string_lossy()
-    );
-    std::fs::remove_dir_all(&dir).unwrap();
-  }
-
-  #[cfg(unix)]
-  #[test]
-  fn resolve_source_unescapes_local_paths() {
-    let dir = fresh_dir("source");
+  fn completer_returns_unescaped_paths() {
+    let dir = fresh_dir("completer");
     let file = dir.join("a b.torrent");
     std::fs::write(&file, "").unwrap();
+    let matches = path_completions(&format!("{}/a", dir.to_str().unwrap()));
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].display, "a b.torrent");
+    assert_eq!(matches[0].replacement, file.to_string_lossy());
+    std::fs::remove_dir_all(&dir).unwrap();
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn completer_appends_a_slash_to_directories() {
+    let dir = fresh_dir("completer-dir");
+    std::fs::create_dir_all(dir.join("sub dir")).unwrap();
+    let matches = path_completions(&format!("{}/su", dir.to_str().unwrap()));
+    assert_eq!(matches.len(), 1);
     assert_eq!(
-      resolve_source(dir.join("a\\ b.torrent").to_str().unwrap()),
-      file.to_string_lossy()
+      matches[0].replacement,
+      format!("{}/sub dir/", dir.to_str().unwrap())
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn completer_keeps_the_whole_line_as_the_path() {
+    // The directory itself contains spaces, which a word-splitting completer
+    // would treat as separate words.
+    let dir = fresh_dir("completer spaces");
+    let sub = dir.join("sub dir");
+    std::fs::create_dir_all(&sub).unwrap();
+    let file = sub.join("a b.torrent");
+    std::fs::write(&file, "").unwrap();
+    let partial = format!("{}/a", sub.to_str().unwrap());
+    let matches = path_completions(&partial);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].replacement, file.to_string_lossy());
     std::fs::remove_dir_all(&dir).unwrap();
   }
 }
