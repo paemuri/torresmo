@@ -17,30 +17,6 @@ use rustyline::{
   KeyEvent, Modifiers, Validator,
 };
 
-/// Custom path completer. Completes paths without shell escaping.
-struct PathCompleter;
-
-impl CompleterTrait for PathCompleter {
-  type Candidate = Pair;
-
-  fn complete(
-    &self,
-    line: &str,
-    pos: usize,
-    _ctx: &Context<'_>,
-  ) -> rustyline::Result<(usize, Vec<Pair>)> {
-    // Returning start 0 makes the candidate replace the whole line, so
-    // rustyline doesn't split it into words at spaces.
-    Ok((0, path_completions(&line[..pos])))
-  }
-}
-
-#[derive(Helper, Completer, Highlighter, Hinter, Validator)]
-struct PathHelper {
-  #[rustyline(Completer)]
-  completer: PathCompleter,
-}
-
 pub fn read_line(
   terminal: &mut DefaultTerminal,
   label: &str,
@@ -68,6 +44,28 @@ pub fn read_line(
   }
 }
 
+pub fn resolve_source(input: &str) -> String {
+  // Magnet links and URLs go to the daemon as typed; anything else is a local
+  // path and should be resolved.
+  if !is_local(input) {
+    return input.to_owned();
+  }
+  resolve_path(input)
+}
+
+pub fn is_local(input: &str) -> bool {
+  !input.starts_with("magnet:") && !input.contains("://")
+}
+
+pub fn resolve_path(input: &str) -> String {
+  let expanded = expand_home(input);
+
+  // Resolve to abs path for the daemon. Rel paths should be accepted as input
+  // and, obviously, that messes up the daemon.
+  std::path::absolute(&expanded)
+    .map_or(expanded, |path| path.to_string_lossy().into_owned())
+}
+
 fn edit_line(initial: &str) -> rustyline::Result<String> {
   let mut editor = Editor::with_config(
     Config::builder()
@@ -85,37 +83,48 @@ fn edit_line(initial: &str) -> rustyline::Result<String> {
   editor.readline_with_initial("", (initial, ""))
 }
 
-pub fn resolve_source(input: &str) -> String {
-  // Magnet links and URLs go to the daemon as typed; anything else is a local
-  // path.
-  if !is_local(input) {
-    return input.to_owned();
+/// Custom path completer. Completes paths without shell escaping. See
+/// path_completions.
+struct PathCompleter;
+
+impl CompleterTrait for PathCompleter {
+  type Candidate = Pair;
+
+  fn complete(
+    &self,
+    line: &str,
+    pos: usize,
+    _ctx: &Context<'_>,
+  ) -> rustyline::Result<(usize, Vec<Pair>)> {
+    // 0 here forces Rustyline to replace the whole line.
+    Ok((0, path_completions(&line[..pos])))
   }
-  resolve_path(input)
 }
 
-pub fn is_local(input: &str) -> bool {
-  !input.starts_with("magnet:") && !input.contains("://")
+/// Just helps wiring PathCompleter into Rustyline.
+#[derive(Helper, Completer, Highlighter, Hinter, Validator)]
+struct PathHelper {
+  #[rustyline(Completer)]
+  completer: PathCompleter,
 }
 
-pub fn resolve_path(input: &str) -> String {
-  let expanded = expand_home(input);
-  // Resolve to abs path for the daemon. Rel paths should be accepted as input
-  // and, obviously, that messes up the daemon.
-  std::path::absolute(&expanded)
-    .map_or(expanded, |path| path.to_string_lossy().into_owned())
-}
-
-// Tab completion during intput (rustyline).
+// Tab completion during input (Rustyline).
 fn path_completions(input: &str) -> Vec<Pair> {
   let expanded = expand_home(input);
+
+  // Split full dir path and the typed entry based on the last `/`. The latter
+  // is the one to be tab-completed.
   let (dir, typed_entry) = match expanded.rfind('/') {
     Some(index) => (&expanded[..=index], &expanded[index + 1..]),
     None => ("", expanded.as_str()),
   };
+
   // Keep the directory as typed, so `~/` stays `~/` in the replacement.
   let typed_dir = &input[..input.len() - typed_entry.len()];
 
+  // This simply `ls` on dir (or `.`, if empty) and compare the entries. If
+  // typed_entry is a prefix to the actual entry, add it as a possible match. In
+  // the end, those matches will be shown as candidates during tab completion.
   let mut matches = Vec::new();
   if let Ok(entries) = fs::read_dir(if dir.is_empty() { "." } else { dir }) {
     for entry in entries.flatten() {
@@ -135,6 +144,7 @@ fn path_completions(input: &str) -> Vec<Pair> {
       });
     }
   }
+
   matches.sort_by(|a, b| a.display.cmp(&b.display));
   matches
 }
