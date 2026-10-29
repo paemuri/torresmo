@@ -10,7 +10,7 @@ use ratatui::crossterm::event::{
 };
 use ratatui::widgets::TableState;
 
-use crate::prompt::{read_line, resolve_path, resolve_source};
+use crate::prompt::{is_local, read_line, resolve_path, resolve_source};
 use crate::rpc::Rpc;
 use crate::transmission::{
   Snapshot, Torrent, TorrentDetails, TorrentStatus, add_torrent,
@@ -135,9 +135,16 @@ impl App {
       }
       (_, KeyCode::Char('a')) => {
         match read_line(terminal, "Add torrent (magnet, URL or path)", "") {
-          Ok(Some(source)) if !source.trim().is_empty() => {
-            let source = resolve_source(source.trim());
-            self.act(move |rpc| add_torrent(rpc, &source));
+          Ok(Some(input)) if !input.trim().is_empty() => {
+            let input = input.trim();
+            let source = resolve_source(input);
+            // Transmission returns a retarded error for missing files:
+            // "unrecognized info". Better check it beforehand.
+            if is_local(input) && !Path::new(&source).exists() {
+              self.action_error = Some(format!("No such file: {source}"));
+            } else {
+              self.act(move |rpc| add_torrent(rpc, &source));
+            }
           }
           Ok(_) => {}
           Err(e) => self.action_error = Some(e.to_string()),

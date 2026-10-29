@@ -68,18 +68,35 @@ fn edit_line(initial: &str) -> rustyline::Result<String> {
 pub fn resolve_source(input: &str) -> String {
   // Magnet links and URLs go to the daemon as typed; anything else is a local
   // path.
-  if input.starts_with("magnet:") || input.contains("://") {
+  if !is_local(input) {
     return input.to_owned();
   }
   resolve_path(input)
 }
 
+pub fn is_local(input: &str) -> bool {
+  !input.starts_with("magnet:") && !input.contains("://")
+}
+
 pub fn resolve_path(input: &str) -> String {
   let expanded = expand_home(input);
+  let expanded = unescape_completion(expanded);
   // Resolve to abs path for the daemon. Rel paths should be accepted as input
   // and, obviously, that messes up the daemon.
   std::path::absolute(&expanded)
     .map_or(expanded, |path| path.to_string_lossy().into_owned())
+}
+
+fn unescape_completion(path: String) -> String {
+  #[cfg(unix)]
+  {
+    // Rustyline outputs a shell-escaped string. This simply removes any `\`
+    // from the path.
+    if path.contains('\\') && !std::path::Path::new(&path).exists() {
+      return rustyline::completion::unescape(&path, Some('\\')).into_owned();
+    }
+  }
+  path
 }
 
 fn expand_home(path: &str) -> String {
@@ -131,5 +148,126 @@ mod tests {
     assert_eq!(resolve_source(magnet), magnet);
     assert_eq!(resolve_source(url), url);
     assert!(resolve_source("x.torrent").starts_with('/'));
+  }
+
+  #[test]
+  fn only_paths_are_local() {
+    assert!(!is_local("magnet:?xt=urn:btih:abc"));
+    assert!(!is_local("https://example.org/x.torrent"));
+    assert!(is_local("x.torrent"));
+    assert!(is_local("~/x.torrent"));
+  }
+
+  #[cfg(unix)]
+  fn fresh_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir()
+      .join(format!("torresmo-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn completion_escapes_are_removed() {
+    let dir = fresh_dir("unescape");
+    let file = dir.join("a b.torrent");
+    std::fs::write(&file, "").unwrap();
+    assert_eq!(
+      resolve_path(dir.join("a\\ b.torrent").to_str().unwrap()),
+      file.to_string_lossy()
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn several_completion_escapes_are_removed() {
+    let dir = fresh_dir("many-escapes");
+    let file = dir.join("[AUTHOR] Name of the media.torrent");
+    std::fs::write(&file, "").unwrap();
+    let completed =
+      dir.join("[AUTHOR]\\ Name\\ of\\ the\\ media.torrent");
+    assert_eq!(
+      resolve_path(completed.to_str().unwrap()),
+      file.to_string_lossy()
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn unescaped_paths_with_spaces_are_untouched() {
+    let dir = fresh_dir("spaces");
+    let file = dir.join("a b.torrent");
+    std::fs::write(&file, "").unwrap();
+    assert_eq!(resolve_path(file.to_str().unwrap()), file.to_string_lossy());
+    std::fs::remove_dir_all(&dir).unwrap();
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn a_real_backslash_in_a_filename_is_not_an_escape() {
+    let dir = fresh_dir("backslash");
+    let file = dir.join("a\\ b.torrent");
+    std::fs::write(&file, "").unwrap();
+    assert_eq!(resolve_path(file.to_str().unwrap()), file.to_string_lossy());
+    std::fs::remove_dir_all(&dir).unwrap();
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn completion_of_a_backslash_filename_is_unescaped_once() {
+    let dir = fresh_dir("backslash-completion");
+    // The real name has both a backslash and a space.
+    let file = dir.join("a\\ b.torrent");
+    std::fs::write(&file, "").unwrap();
+    // Rustyline escapes the backslash as `\\` and the space as `\ `.
+    let completed = dir.join("a\\\\\\ b.torrent");
+    assert_eq!(
+      resolve_path(completed.to_str().unwrap()),
+      file.to_string_lossy()
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn nonexistent_escaped_paths_are_unescaped() {
+    let dir = fresh_dir("nonexistent");
+    let completed = dir.join("missing\\ file.torrent");
+    assert_eq!(
+      resolve_path(completed.to_str().unwrap()),
+      dir.join("missing file.torrent").to_string_lossy()
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn literal_escaped_path_wins_when_both_forms_exist() {
+    let dir = fresh_dir("ambiguous");
+    let literal = dir.join("a\\ b.torrent");
+    let plain = dir.join("a b.torrent");
+    std::fs::write(&literal, "").unwrap();
+    std::fs::write(&plain, "").unwrap();
+    assert_eq!(
+      resolve_path(dir.join("a\\ b.torrent").to_str().unwrap()),
+      literal.to_string_lossy()
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn resolve_source_unescapes_local_paths() {
+    let dir = fresh_dir("source");
+    let file = dir.join("a b.torrent");
+    std::fs::write(&file, "").unwrap();
+    assert_eq!(
+      resolve_source(dir.join("a\\ b.torrent").to_str().unwrap()),
+      file.to_string_lossy()
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
   }
 }
