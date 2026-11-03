@@ -96,19 +96,20 @@ The main repository is on [SourceHut][source-srht]. Mirrors exist on
 [Codeberg][source-codeberg] and [GitHub][source-github] for convenience, but
 they might occasionally be outdated.
 
-### License and contribution
+## License and contribution
 
-This project's code is in the public domain. See the
-[LICENSE file][source-license].
+All original code is licensed under the
+[GNU Affero General Public License 3.0 or later][license-code].
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in the work by you shall be in the public domain, without any
-additional terms or conditions.
+for inclusion in the work by you shall be licensed under the same license as
+the material to which it is contributed, without any additional terms or
+conditions.
 
 [1]: https://github.com/intuis/rustmission
 [2]: https://asciinema.org/a/1270435
 
-[badge-1-img]: https://img.shields.io/badge/license-Unlicense-green?style=flat-square
+[badge-1-img]: https://img.shields.io/badge/license-AGPL--3.0--or--later-green?style=flat-square
 [badge-1-link]: ./LICENSE
 [badge-2-img]: https://img.shields.io/crates/v/torresmo?style=flat-square
 [badge-2-link]: https://crates.io/crates/torresmo
@@ -118,4 +119,5 @@ additional terms or conditions.
 [source-srht]: https://git.sr.ht/~paemuri/torresmo
 [source-codeberg]: https://codeberg.org/paemuri/torresmo
 [source-github]: https://github.com/paemuri/torresmo
-[source-license]: ./LICENSE
+
+[license-code]: ./LICENSES/AGPL-3.0-or-later.txt
