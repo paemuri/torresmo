@@ -1,6 +1,6 @@
 [package]
 name = "torresmo"
-version = "1.0.9"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.99"
 description = "Dead-simple and minimal TUI client for the Transmission daemon"

@@ -106,6 +106,10 @@ for inclusion in the work by you shall be licensed under the same license as
 the material to which it is contributed, without any additional terms or
 conditions.
 
+### License history
+
+Starting with v2.0.0, this project is licensed under AGPL-3.0-or-later.
+
 [1]: https://github.com/intuis/rustmission
 [2]: https://asciinema.org/a/1270435
 
